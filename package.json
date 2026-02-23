@@ -15,7 +15,9 @@
     "@react-navigation/native-stack": "^7.13.0",
     "react": "19.2.3",
     "react-native": "0.84.0",
+    "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "^2.30.0",
+    "react-native-mmkv": "^4.1.2",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.23.0"
   },
