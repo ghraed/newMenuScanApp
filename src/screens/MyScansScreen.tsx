@@ -7,33 +7,45 @@ import {
   View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
-import { useScans } from '../hooks/useScans';
 import { theme } from '../lib/theme';
-import { deleteScan } from '../storage/scanStore';
+import { deleteScanSession, listScanSessions } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
-import { ScanSession } from '../types/scan';
+import { ScanSession } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MyScans'>;
 
 export function MyScansScreen({ navigation }: Props) {
-  const scans = useScans();
+  const [scans, setScans] = React.useState<ScanSession[]>([]);
+
+  const reload = React.useCallback(() => {
+    setScans(listScanSessions());
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      reload();
+    }, [reload]),
+  );
 
   const renderItem = ({ item }: { item: ScanSession }) => (
     <View style={styles.card}>
       <Pressable onPress={() => navigation.navigate('Preview', { scanId: item.id })} style={styles.cardMain}>
         <Text style={styles.cardTitle}>Scan {item.id.slice(-6)}</Text>
         <Text style={styles.cardMeta}>
-          {item.captures.length} captures • {item.dishSizeMeters.toFixed(2)}m • {item.status.replace('_', ' ')}
+          {item.images.length} captures • {item.scaleMeters.toFixed(2)}m • {item.status}
         </Text>
-        <Text style={styles.cardMeta}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
+        <Text style={styles.cardMeta}>Created {new Date(item.createdAt).toLocaleString()}</Text>
       </Pressable>
       <AppButton
         title="Delete"
         variant="danger"
         style={styles.deleteButton}
-        onPress={() => deleteScan(item.id)}
+        onPress={() => {
+          void deleteScanSession(item.id).then(reload);
+        }}
       />
     </View>
   );

@@ -4,7 +4,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import { theme } from '../lib/theme';
-import { createScanSession } from '../storage/scanStore';
+import { createScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Setup'>;
@@ -26,11 +26,11 @@ export function SetupScreen({ navigation }: Props) {
     ? `Dish size: ${parsedSize.toFixed(2)} meters`
     : `Enter a value between ${MIN_DISH_SIZE} and ${MAX_DISH_SIZE} meters`;
 
-  const createSession = () => {
+  const createSession = async () => {
     if (!isValid) {
       return;
     }
-    const session = createScanSession(parsedSize);
+    const session = await createScanSession(parsedSize);
     navigation.replace('Scan', { scanId: session.id });
   };
 
@@ -62,7 +62,7 @@ export function SetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <AppButton title="Create Scan Session" onPress={createSession} disabled={!isValid} />
+      <AppButton title="Create Scan Session" onPress={() => void createSession()} disabled={!isValid} />
     </Screen>
   );
 }

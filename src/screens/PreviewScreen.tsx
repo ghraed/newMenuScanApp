@@ -2,31 +2,43 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import { create3DModel } from '../api/modelApi';
-import { useScan } from '../hooks/useScans';
 import { theme } from '../lib/theme';
-import { deleteScan, setScanStatus } from '../storage/scanStore';
+import { deleteScanSession, getScanSession, upsertScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
+import { ScanSession } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Preview'>;
 
 export function PreviewScreen({ route, navigation }: Props) {
   const { scanId } = route.params;
-  const scan = useScan(scanId);
+  const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const reload = React.useCallback(() => {
+    setScan(getScanSession(scanId));
+  }, [scanId]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      reload();
+    }, [reload]),
+  );
 
   const captureCountLabel = useMemo(() => {
     if (!scan) {
       return '0 captures';
     }
-    return `${scan.captures.length} capture${scan.captures.length === 1 ? '' : 's'}`;
+    return `${scan.images.length} capture${scan.images.length === 1 ? '' : 's'}`;
   }, [scan]);
 
   if (!scan) {
@@ -38,11 +50,22 @@ export function PreviewScreen({ route, navigation }: Props) {
   }
 
   const onCreateModel = async () => {
+    if (!scan) {
+      return;
+    }
     setIsSubmitting(true);
-    setScanStatus(scanId, 'processing');
+    const processingScan: ScanSession = { ...scan, status: 'processing' };
+    setScan(processingScan);
+    await upsertScanSession(processingScan);
     try {
-      const result = await create3DModel(scan);
-      setScanStatus(scanId, 'model_created');
+      const result = await create3DModel(processingScan);
+      const readyScan: ScanSession = {
+        ...processingScan,
+        status: 'ready',
+        outputs: processingScan.outputs ?? {},
+      };
+      setScan(readyScan);
+      await upsertScanSession(readyScan);
       Alert.alert(
         '3D Model Requested',
         result.mocked
@@ -50,7 +73,9 @@ export function PreviewScreen({ route, navigation }: Props) {
           : 'Request sent to backend successfully.',
       );
     } catch {
-      setScanStatus(scanId, 'draft');
+      const errorScan: ScanSession = { ...processingScan, status: 'error' };
+      setScan(errorScan);
+      await upsertScanSession(errorScan);
       Alert.alert('Request Failed', 'Could not create a 3D model request.');
     } finally {
       setIsSubmitting(false);
@@ -58,24 +83,30 @@ export function PreviewScreen({ route, navigation }: Props) {
   };
 
   const onDiscard = () => {
-    deleteScan(scanId);
+    void deleteScanSession(scanId);
     navigation.navigate('MyScans');
   };
 
   return (
     <Screen
       title="Preview"
-      subtitle={`${captureCountLabel} • Status: ${scan.status.replace('_', ' ')}`}>
+      subtitle={`${captureCountLabel} • Status: ${scan.status}`}>
       <View style={styles.thumbGrid}>
-        {scan.captures.length === 0 ? (
+        {scan.images.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>No captures yet. Add captures from Scan screen.</Text>
           </View>
         ) : (
-          scan.captures.map((capture, index) => (
-            <View key={capture.id} style={styles.thumbCard}>
-              <View style={[styles.thumbSwatch, { backgroundColor: capture.thumbnailColor }]} />
-              <Text style={styles.thumbLabel}>Capture {scan.captures.length - index}</Text>
+          scan.images
+            .slice()
+            .sort((a, b) => a.slot - b.slot)
+            .map(capture => (
+            <View key={`${capture.slot}_${capture.timestamp}`} style={styles.thumbCard}>
+              <Image
+                source={{ uri: capture.path.startsWith('file://') ? capture.path : `file://${capture.path}` }}
+                style={styles.thumbImage}
+              />
+              <Text style={styles.thumbLabel}>Slot {capture.slot + 1}</Text>
             </View>
           ))
         )}
@@ -85,7 +116,7 @@ export function PreviewScreen({ route, navigation }: Props) {
         <AppButton
           title={isSubmitting ? 'Creating 3D Model...' : 'Create 3D Model'}
           onPress={onCreateModel}
-          disabled={isSubmitting || scan.captures.length === 0}
+          disabled={isSubmitting || scan.images.length === 0}
         />
         <AppButton title="Discard" variant="danger" onPress={onDiscard} disabled={isSubmitting} />
         {isSubmitting ? <ActivityIndicator color={theme.colors.primary} /> : null}
@@ -110,11 +141,12 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm,
     gap: theme.spacing.sm,
   },
-  thumbSwatch: {
+  thumbImage: {
     height: 90,
     borderRadius: theme.radius.md,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#0E1428',
   },
   thumbLabel: {
     color: theme.colors.text,

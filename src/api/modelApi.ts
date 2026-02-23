@@ -1,4 +1,4 @@
-import { ScanSession } from '../types/scan';
+import { ScanSession } from '../types/scanSession';
 
 export async function create3DModel(scan: ScanSession) {
   try {
@@ -9,8 +9,8 @@ export async function create3DModel(scan: ScanSession) {
       },
       body: JSON.stringify({
         scanId: scan.id,
-        dishSizeMeters: scan.dishSizeMeters,
-        captureCount: scan.captures.length,
+        dishSizeMeters: scan.scaleMeters,
+        captureCount: scan.images.length,
       }),
     });
     return { ok: true as const, mocked: false as const };

@@ -18,8 +18,10 @@
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "^2.30.0",
     "react-native-mmkv": "^4.1.2",
+    "react-native-nitro-modules": "^0.33.9",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-screens": "^4.23.0"
+    "react-native-screens": "^4.23.0",
+    "react-native-vision-camera": "^4.7.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

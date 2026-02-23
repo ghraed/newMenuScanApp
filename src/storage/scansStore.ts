@@ -1,9 +1,9 @@
 import RNFS from 'react-native-fs';
-import { MMKV } from 'react-native-mmkv';
+import { createMMKV } from 'react-native-mmkv';
 import { createUuid } from '../utils/uuid';
 import { ScanSession } from '../types/scanSession';
 
-const storage = new MMKV({ id: 'scans-storage' });
+const storage = createMMKV({ id: 'scans-storage' });
 
 const SCANS_STORAGE_KEY = 'scans:sessions:v1';
 const DEFAULT_SCALE_METERS = 0.24;
@@ -62,6 +62,10 @@ export function getScanImagesDirectoryPath(scanId: string) {
 
 export function getScanImagePath(scanId: string, slot: number) {
   return `${getScanImagesDirectoryPath(scanId)}/${slot}.jpg`;
+}
+
+export async function ensureScanSessionDirectories(scanId: string) {
+  await ensureScanDirectories(scanId);
 }
 
 export async function createScanSession(
