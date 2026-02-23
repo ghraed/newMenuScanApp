@@ -1,25 +1,30 @@
-import { SafeAreaView, StatusBar, StyleSheet, Text } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { StatusBar } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { RootNavigator } from './src/navigation/RootNavigator';
+import { theme } from './src/lib/theme';
+
+const navigationTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: theme.colors.background,
+    card: theme.colors.surface,
+    text: theme.colors.text,
+    primary: theme.colors.primary,
+    border: theme.colors.border,
+  },
+};
 
 function App() {
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <Text style={styles.text}>Hello World</Text>
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <NavigationContainer theme={navigationTheme}>
+        <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
+        <RootNavigator />
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  text: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-});
 
 export default App;
