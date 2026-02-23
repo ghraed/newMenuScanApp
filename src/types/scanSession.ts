@@ -20,6 +20,10 @@ export type ScanSession = {
   slotsTotal: number;
   images: ScanImageSlot[];
   status: ScanSessionStatus;
+  progress?: number;
+  message?: string;
+  uploadCompleted?: number;
+  uploadTotal?: number;
   remoteScanId?: string;
   jobId?: string;
   outputs?: {
