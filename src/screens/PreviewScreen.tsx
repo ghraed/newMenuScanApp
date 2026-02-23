@@ -194,13 +194,14 @@ export function PreviewScreen({ route, navigation }: Props) {
       }
 
       if (current.jobId && current.status === 'processing') {
+        const existingJobId = current.jobId;
         current = await commitSession({
           ...current,
           status: 'processing',
           progress: current.progress ?? 0,
           message: current.message,
         });
-        await pollJobUntilDone(current, remoteScanId, current.jobId);
+        await pollJobUntilDone(current, remoteScanId, existingJobId);
         Alert.alert('3D Model Ready', 'Your model files are ready to open.');
         return;
       }

@@ -1,6 +1,6 @@
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { ZodSchema } from 'zod';
-import { API_KEY, API_URL } from './config';
+import { API_KEY, getApiUrl } from './config';
 
 type ErrorPayload = {
   message?: string;
@@ -9,11 +9,11 @@ type ErrorPayload = {
 };
 
 export const apiClient = axios.create({
-  baseURL: API_URL,
   timeout: 20000,
 });
 
-apiClient.interceptors.request.use(config => {
+apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  config.baseURL = getApiUrl();
   if (API_KEY) {
     config.headers = config.headers ?? {};
     config.headers['X-API-KEY'] = API_KEY;

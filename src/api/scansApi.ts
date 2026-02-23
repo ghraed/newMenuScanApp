@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { apiClient, parseApiResponse, toApiError } from './client';
-import { API_BASE_URL } from './config';
+import { getApiBaseUrl } from './config';
 
 const createScanResponseSchema = z.object({
   scanId: z.string().min(1),
@@ -113,6 +113,5 @@ export async function apiGetJob(jobId: string): Promise<ApiGetJobResponse> {
 }
 
 export function buildFileUrl(scanId: string, type: FileType): string {
-  const base = API_BASE_URL.replace(/\/+$/, '');
-  return `${base}/api/files/${scanId}/${type}`;
+  return `${getApiBaseUrl()}/api/files/${scanId}/${type}`;
 }

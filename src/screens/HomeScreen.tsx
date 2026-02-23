@@ -18,6 +18,11 @@ export function HomeScreen({ navigation }: Props) {
           variant="secondary"
           onPress={() => navigation.navigate('MyScans')}
         />
+        <AppButton
+          title="Settings"
+          variant="secondary"
+          onPress={() => navigation.navigate('Settings')}
+        />
       </View>
     </Screen>
   );
