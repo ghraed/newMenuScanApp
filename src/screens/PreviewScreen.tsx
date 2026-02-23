@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,17 +34,10 @@ export function PreviewScreen({ route, navigation }: Props) {
     }, [reload]),
   );
 
-  const captureCountLabel = useMemo(() => {
-    if (!scan) {
-      return '0 captures';
-    }
-    return `${scan.images.length} capture${scan.images.length === 1 ? '' : 's'}`;
-  }, [scan]);
-
   if (!scan) {
     return (
       <Screen title="Preview" subtitle="Scan session not found.">
-        <AppButton title="My Scans" onPress={() => navigation.navigate('MyScans')} />
+        <AppButton title="Go Home" onPress={() => navigation.navigate('Home')} />
       </Screen>
     );
   }
@@ -83,14 +76,42 @@ export function PreviewScreen({ route, navigation }: Props) {
   };
 
   const onDiscard = () => {
-    void deleteScanSession(scanId);
-    navigation.navigate('MyScans');
+    Alert.alert('Discard Scan', 'Delete this scan session and all captured images?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard Scan',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            await deleteScanSession(scanId);
+            navigation.navigate('Home');
+          })();
+        },
+      },
+    ]);
   };
 
   return (
     <Screen
       title="Preview"
-      subtitle={`${captureCountLabel} • Status: ${scan.status}`}>
+      subtitle="Review your captured images before creating a 3D model.">
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Scale (meters)</Text>
+          <Text style={styles.summaryValue}>{scan.scaleMeters.toFixed(2)}</Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Captured</Text>
+          <Text style={styles.summaryValue}>
+            {scan.images.length} / {scan.slotsTotal}
+          </Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Status</Text>
+          <Text style={styles.summaryValue}>{scan.status}</Text>
+        </View>
+      </View>
+
       <View style={styles.thumbGrid}>
         {scan.images.length === 0 ? (
           <View style={styles.emptyState}>
@@ -118,7 +139,7 @@ export function PreviewScreen({ route, navigation }: Props) {
           onPress={onCreateModel}
           disabled={isSubmitting || scan.images.length === 0}
         />
-        <AppButton title="Discard" variant="danger" onPress={onDiscard} disabled={isSubmitting} />
+        <AppButton title="Discard Scan" variant="danger" onPress={onDiscard} disabled={isSubmitting} />
         {isSubmitting ? <ActivityIndicator color={theme.colors.primary} /> : null}
       </View>
     </Screen>
@@ -126,6 +147,29 @@ export function PreviewScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  summaryCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: theme.spacing.md,
+    gap: theme.spacing.sm,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.spacing.md,
+  },
+  summaryLabel: {
+    color: theme.colors.textMuted,
+    fontSize: 13,
+  },
+  summaryValue: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   thumbGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

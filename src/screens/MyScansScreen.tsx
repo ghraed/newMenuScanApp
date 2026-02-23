@@ -30,19 +30,21 @@ export function MyScansScreen({ navigation }: Props) {
     }, [reload]),
   );
 
+  const formatCreatedAt = React.useCallback((timestamp: number) => {
+    return new Date(timestamp).toLocaleString();
+  }, []);
+
   const renderItem = ({ item }: { item: ScanSession }) => (
-    <View style={styles.card}>
-      <Pressable onPress={() => navigation.navigate('Preview', { scanId: item.id })} style={styles.cardMain}>
-        <Text style={styles.cardTitle}>Scan {item.id.slice(-6)}</Text>
-        <Text style={styles.cardMeta}>
-          {item.images.length} captures • {item.scaleMeters.toFixed(2)}m • {item.status}
-        </Text>
-        <Text style={styles.cardMeta}>Created {new Date(item.createdAt).toLocaleString()}</Text>
+    <View style={styles.row}>
+      <Pressable onPress={() => navigation.navigate('Preview', { scanId: item.id })} style={styles.rowMain}>
+        <Text style={styles.rowPrimary}>{formatCreatedAt(item.createdAt)}</Text>
+        <Text style={styles.rowSecondary}>Captured: {item.images.length}</Text>
+        <Text style={styles.rowSecondary}>Status: {item.status}</Text>
       </Pressable>
       <AppButton
         title="Delete"
         variant="danger"
-        style={styles.deleteButton}
+        style={styles.rowDelete}
         onPress={() => {
           void deleteScanSession(item.id).then(reload);
         }}
@@ -74,39 +76,43 @@ export function MyScansScreen({ navigation }: Props) {
 }
 
 function ListSeparator() {
-  return <View style={styles.separator} />;
+  return <View style={styles.listSeparator} />;
 }
 
 const styles = StyleSheet.create({
   listContent: {
     paddingBottom: theme.spacing.xxl,
   },
-  separator: {
+  listSeparator: {
     height: theme.spacing.md,
   },
-  card: {
+  row: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.xl,
     borderWidth: 1,
     borderColor: theme.colors.border,
     padding: theme.spacing.md,
-    gap: theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
   },
-  cardMain: {
+  rowMain: {
+    flex: 1,
     gap: theme.spacing.xs,
   },
-  cardTitle: {
+  rowPrimary: {
     color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
   },
-  cardMeta: {
+  rowSecondary: {
     color: theme.colors.textMuted,
     fontSize: 13,
   },
-  deleteButton: {
-    alignSelf: 'flex-start',
-    minWidth: 110,
+  rowDelete: {
+    minWidth: 92,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
   },
   empty: {
     backgroundColor: theme.colors.surface,
