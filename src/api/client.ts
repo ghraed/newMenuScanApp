@@ -1,6 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { ZodSchema } from 'zod';
-import { API_KEY, getApiUrl } from './config';
+import { getApiKey, getApiUrl } from './config';
 
 type ErrorPayload = {
   message?: string;
@@ -14,10 +14,13 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   config.baseURL = getApiUrl();
-  if (API_KEY) {
+
+  const apiKey = getApiKey();
+  if (apiKey) {
     config.headers = config.headers ?? {};
-    config.headers['X-API-KEY'] = API_KEY;
+    config.headers['X-API-KEY'] = apiKey;
   }
+
   return config;
 });
 
@@ -46,7 +49,10 @@ export function toApiError(error: unknown, fallbackMessage: string): Error {
         data?.error ||
         (typeof data === 'string' ? data : undefined) ||
         axiosError.message;
-      return new Error(`${fallbackMessage} (HTTP ${status}${detail ? `: ${detail}` : ''})`);
+      const hint = status === 401 ? ' (check API key in Settings)' : '';
+      return new Error(
+        `${fallbackMessage} (HTTP ${status}${detail ? `: ${detail}` : ''})${hint}`,
+      );
     }
 
     if (axiosError.request) {

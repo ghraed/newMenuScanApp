@@ -56,6 +56,20 @@ export type ApiUploadImageParams = {
   };
 };
 
+function normalizeLegacyJobResponse(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return data;
+  }
+
+  const record = data as Record<string, unknown>;
+  if (!Array.isArray(record.outputs)) {
+    return data;
+  }
+
+  const { outputs: _legacyOutputs, ...rest } = record;
+  return rest;
+}
+
 export async function apiCreateScan(
   payload: ApiCreateScanRequest,
 ): Promise<ApiCreateScanResponse> {
@@ -106,7 +120,7 @@ export async function apiSubmitScan(scanId: string): Promise<ApiSubmitScanRespon
 export async function apiGetJob(jobId: string): Promise<ApiGetJobResponse> {
   try {
     const response = await apiClient.get(`/jobs/${jobId}`);
-    return parseApiResponse(jobResponseSchema, response.data, 'apiGetJob');
+    return parseApiResponse(jobResponseSchema, normalizeLegacyJobResponse(response.data), 'apiGetJob');
   } catch (error) {
     throw toApiError(error, `Failed to fetch job ${jobId}`);
   }

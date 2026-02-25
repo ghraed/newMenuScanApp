@@ -10,7 +10,14 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
-import { getApiBaseUrl, getHealthUrl, setApiBaseUrl } from '../api/config';
+import {
+  getApiBaseUrl,
+  getApiKey,
+  getHealthUrl,
+  resetApiKey,
+  setApiBaseUrl,
+  setApiKey,
+} from '../api/config';
 import { theme } from '../lib/theme';
 import { RootStackParamList } from '../types/navigation';
 
@@ -23,6 +30,7 @@ type TestState =
 
 export function SettingsScreen({ navigation }: Props) {
   const [baseUrlInput, setBaseUrlInput] = useState(() => getApiBaseUrl());
+  const [apiKeyInput, setApiKeyInput] = useState(() => getApiKey() ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testState, setTestState] = useState<TestState>({ kind: 'idle' });
@@ -30,10 +38,12 @@ export function SettingsScreen({ navigation }: Props) {
   useFocusEffect(
     React.useCallback(() => {
       setBaseUrlInput(getApiBaseUrl());
+      setApiKeyInput(getApiKey() ?? '');
     }, []),
   );
 
   const normalizedInput = baseUrlInput.trim().replace(/\/+$/, '');
+  const normalizedApiKey = apiKeyInput.trim();
   const isValidUrl = /^https?:\/\/.+/i.test(normalizedInput);
 
   const onSave = async () => {
@@ -44,13 +54,24 @@ export function SettingsScreen({ navigation }: Props) {
 
     try {
       setIsSaving(true);
-      const saved = setApiBaseUrl(normalizedInput);
-      setBaseUrlInput(saved);
-      setTestState({ kind: 'success', message: `Saved: ${saved}` });
+      const savedUrl = setApiBaseUrl(normalizedInput);
+      setBaseUrlInput(savedUrl);
+
+      let keyStatus = 'API key cleared';
+      if (normalizedApiKey) {
+        const savedKey = setApiKey(normalizedApiKey);
+        setApiKeyInput(savedKey);
+        keyStatus = 'API key saved';
+      } else {
+        resetApiKey();
+        setApiKeyInput('');
+      }
+
+      setTestState({ kind: 'success', message: `Saved: ${savedUrl} | ${keyStatus}` });
     } catch (error) {
       setTestState({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Failed to save API base URL.',
+        message: error instanceof Error ? error.message : 'Failed to save settings.',
       });
     } finally {
       setIsSaving(false);
@@ -74,8 +95,8 @@ export function SettingsScreen({ navigation }: Props) {
         const response = await fetch(
           normalizedInput === getApiBaseUrl() ? getHealthUrl() : `${normalizedInput}/up`,
           {
-          method: 'GET',
-          signal: controller.signal,
+            method: 'GET',
+            signal: controller.signal,
           },
         );
 
@@ -106,7 +127,7 @@ export function SettingsScreen({ navigation }: Props) {
   return (
     <Screen
       title="Settings"
-      subtitle="Configure the backend API base URL used for scan uploads and job polling.">
+      subtitle="Configure the backend API base URL and API key used for scan uploads and job polling.">
       <View style={styles.card}>
         <Text style={styles.label}>Backend API Base URL</Text>
         <TextInput
@@ -120,6 +141,21 @@ export function SettingsScreen({ navigation }: Props) {
           style={styles.input}
         />
         <Text style={styles.helper}>Example: `https://scan.rozer.fun` (root URL, no `/api`)</Text>
+
+        <Text style={styles.label}>Scan API Key (X-API-KEY)</Text>
+        <TextInput
+          value={apiKeyInput}
+          onChangeText={setApiKeyInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Enter backend API key"
+          placeholderTextColor={theme.colors.textMuted}
+          secureTextEntry
+          style={styles.input}
+        />
+        <Text style={styles.helper}>
+          Required when the backend sets `API_KEY`. Leave empty to clear the saved key.
+        </Text>
 
         <View style={styles.row}>
           <AppButton
