@@ -1,6 +1,6 @@
 import { createMMKV } from 'react-native-mmkv';
 
-export const API_BASE_URL = 'http://192.168.1.100:8000';
+export const API_BASE_URL = 'https://scan.rozer.fun';
 
 // Set locally when backend auth is enabled.
 export const API_KEY: string | undefined = undefined;
@@ -40,4 +40,8 @@ export function resetApiBaseUrl(): void {
 
 export function getApiUrl(): string {
   return `${getApiBaseUrl()}${API_PREFIX}`;
+}
+
+export function getHealthUrl(): string {
+  return `${getApiBaseUrl()}/up`;
 }

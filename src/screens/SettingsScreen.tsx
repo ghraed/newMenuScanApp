@@ -10,7 +10,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
-import { getApiBaseUrl, setApiBaseUrl } from '../api/config';
+import { getApiBaseUrl, getHealthUrl, setApiBaseUrl } from '../api/config';
 import { theme } from '../lib/theme';
 import { RootStackParamList } from '../types/navigation';
 
@@ -71,10 +71,13 @@ export function SettingsScreen({ navigation }: Props) {
       const timeout = setTimeout(() => controller.abort(), 8000);
 
       try {
-        const response = await fetch(`${normalizedInput}/`, {
+        const response = await fetch(
+          normalizedInput === getApiBaseUrl() ? getHealthUrl() : `${normalizedInput}/up`,
+          {
           method: 'GET',
           signal: controller.signal,
-        });
+          },
+        );
 
         if (response.ok) {
           setTestState({
@@ -112,11 +115,11 @@ export function SettingsScreen({ navigation }: Props) {
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
-          placeholder="http://192.168.1.100:8000"
+          placeholder="https://scan.rozer.fun"
           placeholderTextColor={theme.colors.textMuted}
           style={styles.input}
         />
-        <Text style={styles.helper}>Example: `http://192.168.1.100:8000`</Text>
+        <Text style={styles.helper}>Example: `https://scan.rozer.fun` (root URL, no `/api`)</Text>
 
         <View style={styles.row}>
           <AppButton
