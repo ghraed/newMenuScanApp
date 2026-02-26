@@ -4,10 +4,13 @@ import {
   Alert,
   Image,
   Linking,
+  PermissionsAndroid,
+  Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import RNFS from 'react-native-fs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
@@ -30,6 +33,7 @@ export function PreviewScreen({ route, navigation }: Props) {
   const { scanId } = route.params;
   const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
 
@@ -110,7 +114,10 @@ export function PreviewScreen({ route, navigation }: Props) {
       // Poll every 3 seconds until the backend reports a terminal state.
       for (;;) {
         const job = await apiGetJob(jobId);
-        const progress = Math.max(0, Math.min(100, Math.round(job.progress)));
+        // Backend job progress is stored as a fraction (0..1), while UI renders 0..100.
+        const rawProgress = Number.isFinite(job.progress) ? job.progress : 0;
+        const progressPercent = rawProgress <= 1 ? rawProgress * 100 : rawProgress;
+        const progress = Math.max(0, Math.min(100, Math.round(progressPercent)));
 
         if (job.status === 'ready') {
           const readyScan: ScanSession = {
@@ -294,6 +301,101 @@ export function PreviewScreen({ route, navigation }: Props) {
     ]);
   };
 
+  const ensureExportPermission = React.useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') {
+      return true;
+    }
+
+    const sdk = typeof Platform.Version === 'number' ? Platform.Version : Number(Platform.Version);
+    if (Number.isFinite(sdk) && sdk >= 29) {
+      return true;
+    }
+
+    const permission = PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
+    if (!permission) {
+      return true;
+    }
+
+    const granted = await PermissionsAndroid.request(permission, {
+      title: 'Storage Permission',
+      message: 'Allow access to save scan images to your gallery.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Cancel',
+    });
+
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  }, []);
+
+  const onDownloadImages = React.useCallback(async () => {
+    if (!scan || scan.images.length === 0 || isSubmitting || isExporting) {
+      return;
+    }
+
+    if (Platform.OS !== 'android') {
+      Alert.alert('Not Supported', 'Download to gallery is currently implemented for Android only.');
+      return;
+    }
+
+    const hasPermission = await ensureExportPermission();
+    if (!hasPermission) {
+      Alert.alert('Permission Needed', 'Storage permission is required to save images to gallery.');
+      return;
+    }
+
+    setIsExporting(true);
+
+    try {
+      const baseDir = RNFS.PicturesDirectoryPath || RNFS.DownloadDirectoryPath;
+      if (!baseDir) {
+        throw new Error('No public pictures/download directory found on this device.');
+      }
+
+      const exportDir = `${baseDir}/MenuScanApp/${scan.id}`;
+      await RNFS.mkdir(exportDir);
+
+      const sortedImages = [...scan.images].sort((a, b) => a.slot - b.slot);
+      const exportedPaths: string[] = [];
+
+      for (const capture of sortedImages) {
+        const sourcePath = capture.path.startsWith('file://')
+          ? capture.path.replace('file://', '')
+          : capture.path;
+        const slotLabel = String(capture.slot + 1).padStart(2, '0');
+        const targetPath = `${exportDir}/slot-${slotLabel}.jpg`;
+
+        const exists = await RNFS.exists(sourcePath);
+        if (!exists) {
+          throw new Error(`Missing source image for slot ${capture.slot + 1}`);
+        }
+
+        await RNFS.copyFile(sourcePath, targetPath);
+        exportedPaths.push(targetPath);
+      }
+
+      try {
+        for (const exportedPath of exportedPaths) {
+          await RNFS.scanFile(exportedPath);
+        }
+      } catch {
+        // Some Android versions/devices may not support media scan through RNFS typings/runtime.
+      }
+
+      Alert.alert(
+        'Images Saved',
+        `${exportedPaths.length} images were exported to:\n${exportDir}`,
+      );
+    } catch (error) {
+      Alert.alert(
+        'Export Failed',
+        error instanceof Error ? error.message : 'Could not save images to gallery.',
+      );
+    } finally {
+      if (mountedRef.current) {
+        setIsExporting(false);
+      }
+    }
+  }, [ensureExportPermission, isExporting, isSubmitting, scan]);
+
   return (
     <Screen
       title="Preview"
@@ -390,6 +492,12 @@ export function PreviewScreen({ route, navigation }: Props) {
 
       <View style={styles.actions}>
         <AppButton
+          title={isExporting ? 'Saving Images...' : 'Download Images'}
+          variant="secondary"
+          onPress={() => void onDownloadImages()}
+          disabled={isSubmitting || isExporting || scan.images.length === 0}
+        />
+        <AppButton
           title={
             isSubmitting
               ? scan.status === 'uploading'
@@ -400,10 +508,15 @@ export function PreviewScreen({ route, navigation }: Props) {
                 : 'Create 3D Model'
           }
           onPress={onCreateModel}
-          disabled={isSubmitting || scan.images.length === 0}
+          disabled={isSubmitting || isExporting || scan.images.length === 0}
         />
-        <AppButton title="Discard Scan" variant="danger" onPress={onDiscard} disabled={isSubmitting} />
-        {isSubmitting ? <ActivityIndicator color={theme.colors.primary} /> : null}
+        <AppButton
+          title="Discard Scan"
+          variant="danger"
+          onPress={onDiscard}
+          disabled={isSubmitting || isExporting}
+        />
+        {isSubmitting || isExporting ? <ActivityIndicator color={theme.colors.primary} /> : null}
       </View>
     </Screen>
   );
