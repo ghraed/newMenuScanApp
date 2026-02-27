@@ -31,6 +31,9 @@ import { ScanSession } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Preview'>;
 
+const BG_PREPROCESS_TIMEOUT_MS = 20 * 60 * 1000;
+const BG_DOWNLOAD_RETRY_DELAY_MS = 3000;
+
 function buildRgbaCandidateUrls(scanId: string, slot: number): string[] {
   const base = getApiBaseUrl();
   return [
@@ -39,6 +42,19 @@ function buildRgbaCandidateUrls(scanId: string, slot: number): string[] {
     `${base}/api/files/${scanId}/rgba/${slot}`,
     `${base}/api/files/${scanId}/rgba?slot=${slot}`,
   ];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isNetworkOrTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes('network error') || message.includes('timeout');
 }
 
 export function PreviewScreen({ route, navigation }: Props) {
@@ -464,9 +480,20 @@ export function PreviewScreen({ route, navigation }: Props) {
       }
 
       updateBgProgress('Removing background...');
-      await apiPreprocessScan(remoteScanId);
+      let preprocessConnectionLost = false;
+      try {
+        await apiPreprocessScan(remoteScanId, { timeoutMs: BG_PREPROCESS_TIMEOUT_MS });
+      } catch (error) {
+        if (!isNetworkOrTimeoutError(error)) {
+          throw error;
+        }
+
+        preprocessConnectionLost = true;
+        updateBgProgress('Preprocess request timed out. Checking generated images...');
+        await sleep(8000);
+      }
       completedSteps += 1;
-      updateBgProgress('Background removed. Downloading images...');
+      updateBgProgress('Downloading images...');
 
       const baseDir = RNFS.PicturesDirectoryPath || RNFS.DownloadDirectoryPath;
       if (!baseDir) {
@@ -486,34 +513,44 @@ export function PreviewScreen({ route, navigation }: Props) {
         const targetPath = `${exportDir}/slot-${slotLabel}-rgba.png`;
         const urls = buildRgbaCandidateUrls(remoteScanId, slot);
         let downloaded = false;
+        const attempts = preprocessConnectionLost ? 8 : 3;
         updateBgProgress(`Downloading slot ${slot + 1}/${totalSlots}...`);
 
-        for (const fromUrl of urls) {
-          try {
-            const result = await RNFS.downloadFile({
-              fromUrl,
-              toFile: targetPath,
-              headers,
-            }).promise;
+        for (let attempt = 1; attempt <= attempts && !downloaded; attempt += 1) {
+          for (const fromUrl of urls) {
+            try {
+              const result = await RNFS.downloadFile({
+                fromUrl,
+                toFile: targetPath,
+                headers,
+              }).promise;
 
-            if (result.statusCode >= 200 && result.statusCode < 300) {
+              if (result.statusCode >= 200 && result.statusCode < 300) {
+                const exists = await RNFS.exists(targetPath);
+                if (exists) {
+                  exportedPaths.push(targetPath);
+                  downloaded = true;
+                  break;
+                }
+              }
+
               const exists = await RNFS.exists(targetPath);
               if (exists) {
-                exportedPaths.push(targetPath);
-                downloaded = true;
-                break;
+                await RNFS.unlink(targetPath);
+              }
+            } catch {
+              const exists = await RNFS.exists(targetPath);
+              if (exists) {
+                await RNFS.unlink(targetPath);
               }
             }
+          }
 
-            const exists = await RNFS.exists(targetPath);
-            if (exists) {
-              await RNFS.unlink(targetPath);
-            }
-          } catch {
-            const exists = await RNFS.exists(targetPath);
-            if (exists) {
-              await RNFS.unlink(targetPath);
-            }
+          if (!downloaded && attempt < attempts) {
+            updateBgProgress(
+              `Waiting for slot ${slot + 1}/${totalSlots} (attempt ${attempt + 1}/${attempts})...`,
+            );
+            await sleep(BG_DOWNLOAD_RETRY_DELAY_MS);
           }
         }
 
