@@ -15,6 +15,14 @@ const submitScanResponseSchema = z.object({
   status: z.union([z.literal('queued'), z.literal('processing')]),
 });
 
+const preprocessScanResponseSchema = z.object({
+  ok: z.boolean(),
+  processed: z.number().int().nonnegative(),
+  total: z.number().int().positive(),
+});
+
+const PREPROCESS_SCAN_TIMEOUT_MS = 10 * 60 * 1000;
+
 const jobResponseSchema = z.object({
   status: z.union([
     z.literal('queued'),
@@ -42,6 +50,7 @@ export type ApiCreateScanRequest = {
 export type ApiCreateScanResponse = z.infer<typeof createScanResponseSchema>;
 export type ApiUploadImageResponse = z.infer<typeof uploadImageResponseSchema>;
 export type ApiSubmitScanResponse = z.infer<typeof submitScanResponseSchema>;
+export type ApiPreprocessScanResponse = z.infer<typeof preprocessScanResponseSchema>;
 export type ApiGetJobResponse = z.infer<typeof jobResponseSchema>;
 export type FileType = 'glb' | 'usdz';
 
@@ -66,7 +75,8 @@ function normalizeLegacyJobResponse(data: unknown): unknown {
     return data;
   }
 
-  const { outputs: _legacyOutputs, ...rest } = record;
+  const rest = { ...record };
+  delete rest.outputs;
   return rest;
 }
 
@@ -114,6 +124,22 @@ export async function apiSubmitScan(scanId: string): Promise<ApiSubmitScanRespon
     return parseApiResponse(submitScanResponseSchema, response.data, 'apiSubmitScan');
   } catch (error) {
     throw toApiError(error, `Failed to submit scan ${scanId}`);
+  }
+}
+
+export async function apiPreprocessScan(
+  scanId: string,
+  options?: {
+    timeoutMs?: number;
+  },
+): Promise<ApiPreprocessScanResponse> {
+  try {
+    const response = await apiClient.post(`/scans/${scanId}/preprocess-bg`, undefined, {
+      timeout: options?.timeoutMs ?? PREPROCESS_SCAN_TIMEOUT_MS,
+    });
+    return parseApiResponse(preprocessScanResponseSchema, response.data, 'apiPreprocessScan');
+  } catch (error) {
+    throw toApiError(error, `Failed to preprocess images for scan ${scanId}`);
   }
 }
 

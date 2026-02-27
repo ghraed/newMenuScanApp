@@ -1,4 +1,4 @@
-import { RefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import RNFS from 'react-native-fs';
 import { Camera } from 'react-native-vision-camera';
 import { HeadingState } from './useHeading';
@@ -74,62 +74,65 @@ export function useAutoCapture({
     return getSlotIndexFromHeading(heading.heading, session.slotsTotal);
   }, [heading.heading, session]);
 
-  const captureSlot = async (slot: number) => {
-    const activeSession = sessionRef.current;
-    const camera = cameraRef.current;
+  const captureSlot = useCallback(
+    async (slot: number) => {
+      const activeSession = sessionRef.current;
+      const camera = cameraRef.current;
 
-    if (!activeSession || !camera || capturingRef.current) {
-      return;
-    }
-
-    capturingRef.current = true;
-    setIsCapturing(true);
-    setHoldSteady(false);
-
-    try {
-      const timestamp = Date.now();
-      const photo = await camera.takePhoto({
-        enableShutterSound: false,
-      });
-
-      await ensureScanSessionDirectories(activeSession.id);
-
-      const sourcePath = normalizeFsPath(photo.path);
-      const targetPath = getScanImagePath(activeSession.id, slot);
-      const targetExists = await RNFS.exists(targetPath);
-      if (targetExists) {
-        await RNFS.unlink(targetPath);
+      if (!activeSession || !camera || capturingRef.current) {
+        return;
       }
-      await RNFS.copyFile(sourcePath, targetPath);
 
-      const latestSession = sessionRef.current ?? activeSession;
-      const image: ScanImageSlot = {
-        slot,
-        path: targetPath,
-        heading: normalizeHeading(headingRef.current.heading),
-        timestamp,
-      };
+      capturingRef.current = true;
+      setIsCapturing(true);
+      setHoldSteady(false);
 
-      const nextSession: ScanSession = {
-        ...latestSession,
-        images: [...latestSession.images.filter(item => item.slot !== slot), image].sort(
-          (a, b) => a.slot - b.slot,
-        ),
-        status: 'draft',
-      };
+      try {
+        const timestamp = Date.now();
+        const photo = await camera.takePhoto({
+          enableShutterSound: false,
+        });
 
-      await upsertScanSession(nextSession);
-      sessionRef.current = nextSession;
-      onSessionUpdatedRef.current(nextSession);
+        await ensureScanSessionDirectories(activeSession.id);
 
-      lastAcceptedRef.current = timestamp;
-    } catch {
-      setHoldSteady(true);
-    } finally {
-      capturingRef.current = false;
-      setIsCapturing(false);
-    }
-  };
+        const sourcePath = normalizeFsPath(photo.path);
+        const targetPath = getScanImagePath(activeSession.id, slot);
+        const targetExists = await RNFS.exists(targetPath);
+        if (targetExists) {
+          await RNFS.unlink(targetPath);
+        }
+        await RNFS.copyFile(sourcePath, targetPath);
+
+        const latestSession = sessionRef.current ?? activeSession;
+        const image: ScanImageSlot = {
+          slot,
+          path: targetPath,
+          heading: normalizeHeading(headingRef.current.heading),
+          timestamp,
+        };
+
+        const nextSession: ScanSession = {
+          ...latestSession,
+          images: [...latestSession.images.filter(item => item.slot !== slot), image].sort(
+            (a, b) => a.slot - b.slot,
+          ),
+          status: 'draft',
+        };
+
+        await upsertScanSession(nextSession);
+        sessionRef.current = nextSession;
+        onSessionUpdatedRef.current(nextSession);
+
+        lastAcceptedRef.current = timestamp;
+      } catch {
+        setHoldSteady(true);
+      } finally {
+        capturingRef.current = false;
+        setIsCapturing(false);
+      }
+    },
+    [cameraRef],
+  );
 
   useEffect(() => {
     if (!enabled) {
@@ -161,7 +164,7 @@ export function useAutoCapture({
     }, 120);
 
     return () => clearInterval(timer);
-  }, [cameraRef, enabled]);
+  }, [cameraRef, captureSlot, enabled]);
 
   return {
     currentSlot,

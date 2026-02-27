@@ -18,10 +18,12 @@ import { Screen } from '../components/Screen';
 import {
   apiCreateScan,
   apiGetJob,
+  apiPreprocessScan,
   apiSubmitScan,
   apiUploadImage,
   buildFileUrl,
 } from '../api/scansApi';
+import { getApiBaseUrl, getApiKey } from '../api/config';
 import { theme } from '../lib/theme';
 import { deleteScanSession, getScanSession, upsertScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
@@ -29,11 +31,23 @@ import { ScanSession } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Preview'>;
 
+function buildRgbaCandidateUrls(scanId: string, slot: number): string[] {
+  const base = getApiBaseUrl();
+  return [
+    `${base}/api/scans/${scanId}/images/${slot}/rgba`,
+    `${base}/api/scans/${scanId}/slots/${slot}/rgba`,
+    `${base}/api/files/${scanId}/rgba/${slot}`,
+    `${base}/api/files/${scanId}/rgba?slot=${slot}`,
+  ];
+}
+
 export function PreviewScreen({ route, navigation }: Props) {
   const { scanId } = route.params;
   const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [bgDownloadProgress, setBgDownloadProgress] = useState<number | null>(null);
+  const [bgDownloadStatus, setBgDownloadStatus] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
 
@@ -53,14 +67,6 @@ export function PreviewScreen({ route, navigation }: Props) {
       mountedRef.current = false;
     };
   }, []);
-
-  if (!scan) {
-    return (
-      <Screen title="Preview" subtitle="Scan session not found.">
-        <AppButton title="Go Home" onPress={() => navigation.navigate('Home')} />
-      </Screen>
-    );
-  }
 
   const commitSession = React.useCallback(async (next: ScanSession) => {
     await upsertScanSession(next);
@@ -396,128 +402,325 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
   }, [ensureExportPermission, isExporting, isSubmitting, scan]);
 
+  const onDownloadBgRemovedImages = React.useCallback(async () => {
+    if (!scan || scan.images.length === 0 || isSubmitting || isExporting) {
+      return;
+    }
+
+    if (Platform.OS !== 'android') {
+      Alert.alert('Not Supported', 'Download to gallery is currently implemented for Android only.');
+      return;
+    }
+
+    const hasPermission = await ensureExportPermission();
+    if (!hasPermission) {
+      Alert.alert('Permission Needed', 'Storage permission is required to save images to gallery.');
+      return;
+    }
+
+    setIsExporting(true);
+    setBgDownloadProgress(0);
+    setBgDownloadStatus('Preparing scan...');
+
+    try {
+      let current = getScanSession(scanId) ?? scan;
+
+      if (!current.remoteScanId) {
+        const remote = await apiCreateScan({
+          deviceId: current.id,
+          targetType: 'dish',
+          scaleMeters: current.scaleMeters,
+          slotsTotal: current.slotsTotal,
+        });
+
+        current = await commitSession({
+          ...current,
+          remoteScanId: remote.scanId,
+          message: undefined,
+        });
+      }
+
+      const remoteScanId = current.remoteScanId;
+      if (!remoteScanId) {
+        throw new Error('Missing remote scan id.');
+      }
+
+      const orderedImages = [...current.images].sort((a, b) => a.slot - b.slot);
+      const uploadCount = orderedImages.length;
+      const totalSlots = Math.max(1, current.slotsTotal || 24);
+      const totalSteps = Math.max(1, uploadCount + 1 + totalSlots);
+
+      let completedSteps = 0;
+      const updateBgProgress = (status: string) => {
+        setBgDownloadStatus(status);
+        setBgDownloadProgress(Math.min(100, Math.round((completedSteps / totalSteps) * 100)));
+      };
+
+      for (const image of orderedImages) {
+        updateBgProgress(`Uploading slot ${image.slot + 1}...`);
+        await uploadWithRetry(remoteScanId, image);
+        completedSteps += 1;
+        updateBgProgress(`Uploaded slot ${image.slot + 1}`);
+      }
+
+      updateBgProgress('Removing background...');
+      await apiPreprocessScan(remoteScanId);
+      completedSteps += 1;
+      updateBgProgress('Background removed. Downloading images...');
+
+      const baseDir = RNFS.PicturesDirectoryPath || RNFS.DownloadDirectoryPath;
+      if (!baseDir) {
+        throw new Error('No public pictures/download directory found on this device.');
+      }
+
+      const exportDir = `${baseDir}/MenuScanApp/${current.id}/bg-removed`;
+      await RNFS.mkdir(exportDir);
+
+      const apiKey = getApiKey();
+      const headers = apiKey ? { 'X-API-KEY': apiKey } : undefined;
+      const exportedPaths: string[] = [];
+      const failedSlots: number[] = [];
+
+      for (let slot = 0; slot < totalSlots; slot += 1) {
+        const slotLabel = String(slot + 1).padStart(2, '0');
+        const targetPath = `${exportDir}/slot-${slotLabel}-rgba.png`;
+        const urls = buildRgbaCandidateUrls(remoteScanId, slot);
+        let downloaded = false;
+        updateBgProgress(`Downloading slot ${slot + 1}/${totalSlots}...`);
+
+        for (const fromUrl of urls) {
+          try {
+            const result = await RNFS.downloadFile({
+              fromUrl,
+              toFile: targetPath,
+              headers,
+            }).promise;
+
+            if (result.statusCode >= 200 && result.statusCode < 300) {
+              const exists = await RNFS.exists(targetPath);
+              if (exists) {
+                exportedPaths.push(targetPath);
+                downloaded = true;
+                break;
+              }
+            }
+
+            const exists = await RNFS.exists(targetPath);
+            if (exists) {
+              await RNFS.unlink(targetPath);
+            }
+          } catch {
+            const exists = await RNFS.exists(targetPath);
+            if (exists) {
+              await RNFS.unlink(targetPath);
+            }
+          }
+        }
+
+        if (!downloaded) {
+          failedSlots.push(slot + 1);
+        }
+        completedSteps += 1;
+        updateBgProgress(`Downloaded ${slot + 1}/${totalSlots}`);
+      }
+
+      if (exportedPaths.length === 0) {
+        throw new Error('No background-removed images were available to download.');
+      }
+
+      try {
+        for (const exportedPath of exportedPaths) {
+          await RNFS.scanFile(exportedPath);
+        }
+      } catch {
+        // Some Android versions/devices may not support media scan through RNFS typings/runtime.
+      }
+
+      const failedSuffix =
+        failedSlots.length > 0 ? `\nMissing slots: ${failedSlots.join(', ')}` : '';
+      setBgDownloadProgress(100);
+      setBgDownloadStatus('Completed');
+      Alert.alert(
+        'Images Saved',
+        `${exportedPaths.length} background-removed images were exported to:\n${exportDir}${failedSuffix}`,
+      );
+    } catch (error) {
+      Alert.alert(
+        'Export Failed',
+        error instanceof Error ? error.message : 'Could not save background-removed images.',
+      );
+    } finally {
+      if (mountedRef.current) {
+        setIsExporting(false);
+        setTimeout(() => {
+          if (mountedRef.current) {
+            setBgDownloadProgress(null);
+            setBgDownloadStatus(null);
+          }
+        }, 1200);
+      }
+    }
+  }, [
+    commitSession,
+    ensureExportPermission,
+    isExporting,
+    isSubmitting,
+    scan,
+    scanId,
+    uploadWithRetry,
+  ]);
+
   return (
     <Screen
       title="Preview"
-      subtitle="Review your captured images before creating a 3D model.">
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Scale (meters)</Text>
-          <Text style={styles.summaryValue}>{scan.scaleMeters.toFixed(2)}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Captured</Text>
-          <Text style={styles.summaryValue}>
-            {scan.images.length} / {scan.slotsTotal}
-          </Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Status</Text>
-          <Text style={styles.summaryValue}>{scan.status}</Text>
-        </View>
-      </View>
-
-      <View style={styles.thumbGrid}>
-        {scan.images.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>No captures yet. Add captures from Scan screen.</Text>
-          </View>
-        ) : (
-          scan.images
-            .slice()
-            .sort((a, b) => a.slot - b.slot)
-            .map(capture => (
-            <View key={`${capture.slot}_${capture.timestamp}`} style={styles.thumbCard}>
-              <Image
-                source={{ uri: capture.path.startsWith('file://') ? capture.path : `file://${capture.path}` }}
-                style={styles.thumbImage}
-              />
-              <Text style={styles.thumbLabel}>Slot {capture.slot + 1}</Text>
+      subtitle={scan ? 'Review your captured images before creating a 3D model.' : 'Scan session not found.'}>
+      {!scan ? (
+        <AppButton title="Go Home" onPress={() => navigation.navigate('Home')} />
+      ) : (
+        <>
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Scale (meters)</Text>
+              <Text style={styles.summaryValue}>{scan.scaleMeters.toFixed(2)}</Text>
             </View>
-          ))
-        )}
-      </View>
-
-      {(scan.status === 'uploading' || scan.status === 'processing') && (
-        <View style={styles.progressCard}>
-          <Text style={styles.progressTitle}>
-            {scan.status === 'uploading' ? 'Uploading Images' : 'Processing 3D Model'}
-          </Text>
-          {scan.status === 'uploading' ? (
-            <Text style={styles.progressMeta}>
-              {scan.uploadCompleted ?? 0} / {scan.uploadTotal ?? scan.images.length}
-            </Text>
-          ) : (
-            <Text style={styles.progressMeta}>{Math.round(scan.progress ?? 0)}%</Text>
-          )}
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${Math.max(0, Math.min(100, Math.round(scan.progress ?? 0)))}%` },
-              ]}
-            />
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Captured</Text>
+              <Text style={styles.summaryValue}>
+                {scan.images.length} / {scan.slotsTotal}
+              </Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Status</Text>
+              <Text style={styles.summaryValue}>{scan.status}</Text>
+            </View>
           </View>
-          {scan.message ? <Text style={styles.progressMessage}>{scan.message}</Text> : null}
-        </View>
-      )}
 
-      {scan.status === 'error' && scan.message ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Processing Error</Text>
-          <Text style={styles.errorText}>{scan.message}</Text>
-        </View>
-      ) : null}
+          <View style={styles.thumbGrid}>
+            {scan.images.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>No captures yet. Add captures from Scan screen.</Text>
+              </View>
+            ) : (
+              scan.images
+                .slice()
+                .sort((a, b) => a.slot - b.slot)
+                .map(capture => (
+                <View key={`${capture.slot}_${capture.timestamp}`} style={styles.thumbCard}>
+                  <Image
+                    source={{ uri: capture.path.startsWith('file://') ? capture.path : `file://${capture.path}` }}
+                    style={styles.thumbImage}
+                  />
+                  <Text style={styles.thumbLabel}>Slot {capture.slot + 1}</Text>
+                </View>
+              ))
+            )}
+          </View>
 
-      {scan.status === 'ready' && scan.outputs?.glbUrl ? (
-        <View style={styles.actions}>
-          <AppButton
-            title="Open GLB"
-            variant="secondary"
-            onPress={() => {
-              void Linking.openURL(scan.outputs!.glbUrl!);
-            }}
-          />
-          {scan.outputs?.usdzUrl ? (
-            <AppButton
-              title="Open USDZ"
-              variant="secondary"
-              onPress={() => {
-                void Linking.openURL(scan.outputs!.usdzUrl!);
-              }}
-            />
+          {(scan.status === 'uploading' || scan.status === 'processing') && (
+            <View style={styles.progressCard}>
+              <Text style={styles.progressTitle}>
+                {scan.status === 'uploading' ? 'Uploading Images' : 'Processing 3D Model'}
+              </Text>
+              {scan.status === 'uploading' ? (
+                <Text style={styles.progressMeta}>
+                  {scan.uploadCompleted ?? 0} / {scan.uploadTotal ?? scan.images.length}
+                </Text>
+              ) : (
+                <Text style={styles.progressMeta}>{Math.round(scan.progress ?? 0)}%</Text>
+              )}
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${Math.max(0, Math.min(100, Math.round(scan.progress ?? 0)))}%` },
+                  ]}
+                />
+              </View>
+              {scan.message ? <Text style={styles.progressMessage}>{scan.message}</Text> : null}
+            </View>
+          )}
+
+          {bgDownloadProgress !== null && (
+            <View style={styles.progressCard}>
+              <Text style={styles.progressTitle}>Preparing BG-Removed Images</Text>
+              <Text style={styles.progressMeta}>{Math.round(bgDownloadProgress)}%</Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${Math.max(0, Math.min(100, Math.round(bgDownloadProgress)))}%` },
+                  ]}
+                />
+              </View>
+              {bgDownloadStatus ? <Text style={styles.progressMessage}>{bgDownloadStatus}</Text> : null}
+            </View>
+          )}
+
+          {scan.status === 'error' && scan.message ? (
+            <View style={styles.errorCard}>
+              <Text style={styles.errorTitle}>Processing Error</Text>
+              <Text style={styles.errorText}>{scan.message}</Text>
+            </View>
           ) : null}
-        </View>
-      ) : null}
 
-      <View style={styles.actions}>
-        <AppButton
-          title={isExporting ? 'Saving Images...' : 'Download Images'}
-          variant="secondary"
-          onPress={() => void onDownloadImages()}
-          disabled={isSubmitting || isExporting || scan.images.length === 0}
-        />
-        <AppButton
-          title={
-            isSubmitting
-              ? scan.status === 'uploading'
-                ? 'Uploading...'
-                : 'Creating 3D Model...'
-              : scan.status === 'error'
-                ? 'Retry Create 3D Model'
-                : 'Create 3D Model'
-          }
-          onPress={onCreateModel}
-          disabled={isSubmitting || isExporting || scan.images.length === 0}
-        />
-        <AppButton
-          title="Discard Scan"
-          variant="danger"
-          onPress={onDiscard}
-          disabled={isSubmitting || isExporting}
-        />
-        {isSubmitting || isExporting ? <ActivityIndicator color={theme.colors.primary} /> : null}
-      </View>
+          {scan.status === 'ready' && scan.outputs?.glbUrl ? (
+            <View style={styles.actions}>
+              <AppButton
+                title="Open GLB"
+                variant="secondary"
+                onPress={() => {
+                  void Linking.openURL(scan.outputs!.glbUrl!);
+                }}
+              />
+              {scan.outputs?.usdzUrl ? (
+                <AppButton
+                  title="Open USDZ"
+                  variant="secondary"
+                  onPress={() => {
+                    void Linking.openURL(scan.outputs!.usdzUrl!);
+                  }}
+                />
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={styles.actions}>
+            <AppButton
+              title={isExporting ? 'Saving Images...' : 'Download Images'}
+              variant="secondary"
+              onPress={() => void onDownloadImages()}
+              disabled={isSubmitting || isExporting || scan.images.length === 0}
+            />
+            <AppButton
+              title={isExporting ? 'Saving BG-Removed...' : 'Download BG-Removed Images'}
+              variant="primary"
+              style={styles.bgRemovedButton}
+              onPress={() => void onDownloadBgRemovedImages()}
+              disabled={isSubmitting || isExporting || scan.images.length === 0}
+            />
+            <AppButton
+              title={
+                isSubmitting
+                  ? scan.status === 'uploading'
+                    ? 'Uploading...'
+                    : 'Creating 3D Model...'
+                  : scan.status === 'error'
+                    ? 'Retry Create 3D Model'
+                    : 'Create 3D Model'
+              }
+              onPress={onCreateModel}
+              disabled={isSubmitting || isExporting || scan.images.length === 0}
+            />
+            <AppButton
+              title="Discard Scan"
+              variant="danger"
+              onPress={onDiscard}
+              disabled={isSubmitting || isExporting}
+            />
+            {isSubmitting || isExporting ? <ActivityIndicator color={theme.colors.primary} /> : null}
+          </View>
+        </>
+      )}
     </Screen>
   );
 }
@@ -635,5 +838,9 @@ const styles = StyleSheet.create({
   actions: {
     gap: theme.spacing.md,
     marginTop: theme.spacing.sm,
+  },
+  bgRemovedButton: {
+    backgroundColor: '#3A8D5D',
+    borderColor: '#3A8D5D',
   },
 });

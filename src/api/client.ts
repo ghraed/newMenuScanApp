@@ -56,6 +56,9 @@ export function toApiError(error: unknown, fallbackMessage: string): Error {
     }
 
     if (axiosError.request) {
+      if (axiosError.code === 'ECONNABORTED') {
+        return new Error(`${fallbackMessage} (request timed out)`);
+      }
       return new Error(`${fallbackMessage} (network error or timeout)`);
     }
 
