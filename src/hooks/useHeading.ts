@@ -1,3 +1,4 @@
+import { DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 
 type HeadingSample = {
@@ -29,6 +30,49 @@ function shortestDeltaDegrees(next: number, prev: number) {
   return ((next - prev + 540) % 360) - 180;
 }
 
+type NativeHeadingModule = {
+  start?: () => void;
+  stop?: () => void;
+};
+
+const HEADING_SAMPLE_EVENT = 'HeadingSensorSample';
+const headingSensorModule = NativeModules.HeadingSensorModule as NativeHeadingModule | undefined;
+
+function createAndroidSensorHeadingProvider(): HeadingProvider | null {
+  if (Platform.OS !== 'android' || !headingSensorModule?.start || !headingSensorModule?.stop) {
+    return null;
+  }
+
+  return {
+    start(onSample) {
+      const subscription = DeviceEventEmitter.addListener(HEADING_SAMPLE_EVENT, payload => {
+        if (!payload || typeof payload !== 'object') {
+          return;
+        }
+
+        const headingValue = Number((payload as { heading?: unknown }).heading);
+        const timestampValue = Number((payload as { timestamp?: unknown }).timestamp);
+
+        if (!Number.isFinite(headingValue) || !Number.isFinite(timestampValue)) {
+          return;
+        }
+
+        onSample({
+          heading: normalizeHeading(headingValue),
+          timestamp: Math.max(0, Math.floor(timestampValue)),
+        });
+      });
+
+      headingSensorModule.start?.();
+
+      return () => {
+        subscription.remove();
+        headingSensorModule.stop?.();
+      };
+    },
+  };
+}
+
 export function createPlaceholderHeadingProvider(): HeadingProvider {
   return {
     start(onSample) {
@@ -55,12 +99,12 @@ export function createPlaceholderHeadingProvider(): HeadingProvider {
   };
 }
 
-const defaultProvider = createPlaceholderHeadingProvider();
+const defaultProvider = createAndroidSensorHeadingProvider() ?? createPlaceholderHeadingProvider();
 
 export function useHeading({
   enabled = true,
   provider = defaultProvider,
-  stableRateThresholdDegPerSec = 24,
+  stableRateThresholdDegPerSec = 8,
 }: UseHeadingOptions = {}): HeadingState {
   const [state, setState] = useState<HeadingState>({
     heading: 0,

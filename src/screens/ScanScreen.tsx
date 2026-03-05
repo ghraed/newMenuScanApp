@@ -59,7 +59,10 @@ export function ScanScreen({ route, navigation }: Props) {
 
   const capturedCount = session?.images.length ?? 0;
   const slotsTotal = session?.slotsTotal ?? 24;
-  const capturedSlots = useMemo(() => session?.images.map(image => image.slot) ?? [], [session]);
+  const capturedSlots = useMemo(() => {
+    const slots = session?.images.map(image => image.slot) ?? [];
+    return Array.from(new Set(slots)).sort((a, b) => a - b);
+  }, [session]);
   const finishEnabled = capturedCount >= 12;
 
   if (!session) {
