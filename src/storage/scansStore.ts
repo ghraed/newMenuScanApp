@@ -42,6 +42,7 @@ async function ensureScanDirectories(scanId: string) {
   await ensureDir(SCANS_ROOT_PATH);
   await ensureDir(getScanDirectoryPath(scanId));
   await ensureDir(getScanImagesDirectoryPath(scanId));
+  await ensureDir(getScanBgDirectoryPath(scanId));
 }
 
 function sortSessionsNewestFirst(sessions: ScanSession[]) {
@@ -62,6 +63,18 @@ export function getScanImagesDirectoryPath(scanId: string) {
 
 export function getScanImagePath(scanId: string, slot: number) {
   return `${getScanImagesDirectoryPath(scanId)}/${slot}.jpg`;
+}
+
+export function getScanBgDirectoryPath(scanId: string) {
+  return `${getScanDirectoryPath(scanId)}/bg-removed`;
+}
+
+export function getScanBgPreviewPath(scanId: string, slot: number) {
+  return `${getScanBgDirectoryPath(scanId)}/slot-${slot}-preview.png`;
+}
+
+export function getScanBgFinalPath(scanId: string, slot: number) {
+  return `${getScanBgDirectoryPath(scanId)}/slot-${slot}-final.png`;
 }
 
 export async function ensureScanSessionDirectories(scanId: string) {
@@ -125,4 +138,15 @@ export async function deleteScanSession(id: string): Promise<void> {
   if (exists) {
     await RNFS.unlink(scanDirPath);
   }
+}
+
+export async function deleteScanBackgroundOutputs(scanId: string): Promise<void> {
+  const bgDirPath = getScanBgDirectoryPath(scanId);
+  const exists = await RNFS.exists(bgDirPath);
+
+  if (exists) {
+    await RNFS.unlink(bgDirPath);
+  }
+
+  await ensureDir(bgDirPath);
 }

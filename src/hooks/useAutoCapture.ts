@@ -25,8 +25,10 @@ type Params = {
 
 type Result = {
   currentSlot: number | null;
+  currentSlotCaptured: boolean;
   holdSteady: boolean;
   isCapturing: boolean;
+  captureCurrentMissingSlot: () => Promise<void>;
 };
 
 function normalizeHeading(value: number) {
@@ -118,6 +120,14 @@ export function useAutoCapture({
     return getSlotIndexFromHeading(heading.heading, session.slotsTotal);
   }, [heading.heading, session]);
 
+  const currentSlotCaptured = useMemo(() => {
+    if (!session || currentSlot === null) {
+      return false;
+    }
+
+    return session.images.some(image => image.slot === currentSlot);
+  }, [currentSlot, session]);
+
   const captureSlot = useCallback(
     async (slot: number) => {
       const activeSession = sessionRef.current;
@@ -181,6 +191,24 @@ export function useAutoCapture({
     [cameraRef],
   );
 
+  const captureCurrentMissingSlot = useCallback(async () => {
+    const activeSession = sessionRef.current;
+    const slot = activeSession
+      ? getSlotIndexFromHeading(headingRef.current.heading, activeSession.slotsTotal)
+      : null;
+
+    if (!activeSession || slot === null) {
+      return;
+    }
+
+    const slotCaptured = activeSession.images.some(image => image.slot === slot);
+    if (slotCaptured) {
+      return;
+    }
+
+    await captureSlot(slot);
+  }, [captureSlot]);
+
   useEffect(() => {
     if (!enabled) {
       setHoldSteady(false);
@@ -241,7 +269,9 @@ export function useAutoCapture({
 
   return {
     currentSlot,
+    currentSlotCaptured,
     holdSteady,
     isCapturing,
+    captureCurrentMissingSlot,
   };
 }
