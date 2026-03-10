@@ -29,6 +29,7 @@ const backgroundJobResponseSchema = z.object({
     z.literal('processing'),
     z.literal('partial'),
     z.literal('ready'),
+    z.literal('canceled'),
     z.literal('error'),
   ]),
   progress: z.number(),
@@ -43,6 +44,7 @@ const jobResponseSchema = z.object({
     z.literal('processing'),
     z.literal('partial'),
     z.literal('ready'),
+    z.literal('canceled'),
     z.literal('error'),
   ]),
   progress: z.number(),
@@ -69,7 +71,7 @@ export type ApiUploadImageResponse = z.infer<typeof uploadImageResponseSchema>;
 export type ApiSubmitScanResponse = z.infer<typeof submitScanResponseSchema>;
 export type ApiStartBackgroundRemovalResponse = {
   jobId: string;
-  status: 'queued' | 'processing' | 'partial' | 'ready' | 'error';
+  status: 'queued' | 'processing' | 'partial' | 'ready' | 'canceled' | 'error';
   progress: number;
   availableSlots: number[];
   previewAvailable: boolean;
@@ -236,6 +238,31 @@ export async function apiGetJob(jobId: string): Promise<ApiGetJobResponse> {
     return parseApiResponse(jobResponseSchema, normalizeLegacyJobResponse(response.data), 'apiGetJob');
   } catch (error) {
     throw toApiError(error, `Failed to fetch job ${jobId}`);
+  }
+}
+
+const cancelJobResponseSchema = z.object({
+  jobId: z.string().min(1),
+  status: z.union([
+    z.literal('queued'),
+    z.literal('processing'),
+    z.literal('partial'),
+    z.literal('ready'),
+    z.literal('canceled'),
+    z.literal('error'),
+  ]),
+  progress: z.number(),
+  message: z.string().optional(),
+});
+
+export type ApiCancelJobResponse = z.infer<typeof cancelJobResponseSchema>;
+
+export async function apiCancelJob(jobId: string): Promise<ApiCancelJobResponse> {
+  try {
+    const response = await apiClient.post(`/jobs/${jobId}/cancel`);
+    return parseApiResponse(cancelJobResponseSchema, response.data, 'apiCancelJob');
+  } catch (error) {
+    throw toApiError(error, `Failed to cancel job ${jobId}`);
   }
 }
 

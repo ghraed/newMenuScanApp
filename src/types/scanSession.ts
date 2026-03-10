@@ -33,6 +33,7 @@ export type BackgroundJobStatus =
   | 'processing'
   | 'partial'
   | 'ready'
+  | 'canceled'
   | 'error';
 
 export type BackgroundOutput = {
@@ -46,6 +47,7 @@ export type ScanSessionStatus =
   | 'draft'
   | 'uploading'
   | 'processing'
+  | 'canceled'
   | 'ready'
   | 'error';
 

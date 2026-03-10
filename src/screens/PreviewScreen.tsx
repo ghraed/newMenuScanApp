@@ -16,6 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import {
+  apiCancelJob,
   apiCreateScan,
   apiGetJob,
   apiStartBackgroundRemoval,
@@ -94,6 +95,8 @@ function getBackgroundCardTitle(scan: ScanSession) {
       return 'Preview Ready';
     case 'ready':
       return 'Completed';
+    case 'canceled':
+      return 'Background Removal Canceled';
     case 'error':
       return 'Background Removal Error';
     default:
@@ -137,6 +140,10 @@ function isNetworkOrTimeoutError(error: unknown) {
 
 function isLegacyBackgroundJob(jobId: string | undefined) {
   return typeof jobId === 'string' && jobId.startsWith('legacy:');
+}
+
+function isActiveJobStatus(status: string | undefined) {
+  return ['queued', 'processing', 'partial', 'uploading'].includes(status ?? '');
 }
 
 export function PreviewScreen({ route, navigation }: Props) {
@@ -265,6 +272,15 @@ export function PreviewScreen({ route, navigation }: Props) {
           };
           await commitSession(errorScan);
           throw new Error(errorScan.message);
+        }
+
+        if (job.status === 'canceled') {
+          return commitSession({
+            ...current,
+            status: 'canceled',
+            progress,
+            message: job.message || '3D model processing was canceled.',
+          });
         }
 
         current = await commitSession({
@@ -454,6 +470,15 @@ export function PreviewScreen({ route, navigation }: Props) {
 
         if (job.status === 'ready') {
           return current;
+        }
+
+        if (job.status === 'canceled') {
+          return commitSession({
+            ...current,
+            bgStatus: 'canceled',
+            bgProgress: progress,
+            bgMessage: job.message || 'Background removal was canceled.',
+          });
         }
 
         if (job.status === 'error') {
@@ -678,7 +703,7 @@ export function PreviewScreen({ route, navigation }: Props) {
           throw new Error('Missing remote scan id.');
         }
 
-        if (current.bgJobId && ['queued', 'processing', 'partial'].includes(current.bgStatus ?? '')) {
+        if (current.bgJobId && isActiveJobStatus(current.bgStatus)) {
           current = isLegacyBackgroundJob(current.bgJobId)
             ? await pollLegacyBackgroundOutputs(current, remoteScanId, current.bgMessage)
             : await pollBackgroundJobUntilDone(current, remoteScanId, current.bgJobId);
@@ -896,7 +921,7 @@ export function PreviewScreen({ route, navigation }: Props) {
       return;
     }
 
-    if (scan.bgJobId && ['queued', 'processing', 'partial'].includes(scan.bgStatus ?? '')) {
+    if (scan.bgJobId && isActiveJobStatus(scan.bgStatus)) {
       runBackgroundRemovalFlow(false).catch(() => undefined);
     }
   }, [isExporting, isSubmitting, runBackgroundRemovalFlow, scan]);
@@ -963,6 +988,60 @@ export function PreviewScreen({ route, navigation }: Props) {
       ],
     );
   }, [commitSession, isExporting, isSubmitting, scan]);
+
+  const onCancelProcess = React.useCallback(() => {
+    if (!scan) {
+      return;
+    }
+
+    const isBackgroundActive = Boolean(scan.bgJobId) && isActiveJobStatus(scan.bgStatus);
+    const isModelActive = Boolean(scan.jobId) && isActiveJobStatus(scan.status);
+    const jobId = isBackgroundActive ? scan.bgJobId : isModelActive ? scan.jobId : undefined;
+
+    if (!jobId) {
+      return;
+    }
+
+    const title = isBackgroundActive ? 'Cancel Background Removal' : 'Cancel 3D Model';
+    const message = isBackgroundActive
+      ? 'Stop the current background-removal job?'
+      : 'Stop the current 3D model job?';
+
+    Alert.alert(title, message, [
+      { text: 'Keep Running', style: 'cancel' },
+      {
+        text: 'Cancel Process',
+        style: 'destructive',
+        onPress: () => {
+          (async () => {
+            const result = await apiCancelJob(jobId);
+            const latest = getScanSession(scanId) ?? scan;
+
+            if (isBackgroundActive) {
+              await commitSession({
+                ...latest,
+                bgStatus: 'canceled',
+                bgProgress: normalizeProgress(result.progress),
+                bgMessage: result.message ?? 'Background removal was canceled.',
+              });
+            } else {
+              await commitSession({
+                ...latest,
+                status: 'canceled',
+                progress: normalizeProgress(result.progress),
+                message: result.message ?? '3D model processing was canceled.',
+              });
+            }
+          })().catch(error => {
+            Alert.alert(
+              'Cancel Failed',
+              error instanceof Error ? error.message : 'Could not cancel the active job.',
+            );
+          });
+        },
+      },
+    ]);
+  }, [commitSession, scan, scanId]);
 
   const onDownloadImages = React.useCallback(async () => {
     if (!scan || scan.images.length === 0 || isSubmitting || isExporting) {
@@ -1190,9 +1269,23 @@ export function PreviewScreen({ route, navigation }: Props) {
             </View>
           ) : null}
 
+          {scan.status === 'canceled' && scan.message ? (
+            <View style={styles.errorCard}>
+              <Text style={styles.errorTitle}>3D Model Canceled</Text>
+              <Text style={styles.errorText}>{scan.message}</Text>
+            </View>
+          ) : null}
+
           {scan.bgStatus === 'error' && scan.bgMessage ? (
             <View style={styles.errorCard}>
               <Text style={styles.errorTitle}>Background Removal Error</Text>
+              <Text style={styles.errorText}>{scan.bgMessage}</Text>
+            </View>
+          ) : null}
+
+          {scan.bgStatus === 'canceled' && scan.bgMessage ? (
+            <View style={styles.errorCard}>
+              <Text style={styles.errorTitle}>Background Removal Canceled</Text>
               <Text style={styles.errorText}>{scan.bgMessage}</Text>
             </View>
           ) : null}
@@ -1250,8 +1343,16 @@ export function PreviewScreen({ route, navigation }: Props) {
                   isSubmitting ||
                   isExporting ||
                   bgRunningRef.current ||
-                  ['uploading', 'queued', 'processing', 'partial'].includes(scan.bgStatus ?? '')
+                  isActiveJobStatus(scan.bgStatus)
                 }
+              />
+            ) : null}
+            {(isActiveJobStatus(scan.status) && scan.jobId) || (isActiveJobStatus(scan.bgStatus) && scan.bgJobId) ? (
+              <AppButton
+                title={isActiveJobStatus(scan.bgStatus) ? 'Cancel BG Process' : 'Cancel 3D Process'}
+                variant="danger"
+                onPress={onCancelProcess}
+                disabled={false}
               />
             ) : null}
             <AppButton
@@ -1260,7 +1361,7 @@ export function PreviewScreen({ route, navigation }: Props) {
                   ? scan.status === 'uploading'
                     ? 'Uploading...'
                     : 'Creating 3D Model...'
-                  : scan.status === 'error'
+                  : scan.status === 'error' || scan.status === 'canceled'
                     ? 'Retry Create 3D Model'
                     : 'Create 3D Model'
               }
