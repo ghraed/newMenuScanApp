@@ -151,6 +151,7 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isDownloadingModel, setIsDownloadingModel] = useState(false);
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
   const bgRunningRef = useRef(false);
@@ -1110,6 +1111,70 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
   }, [ensureExportPermission, isExporting, isSubmitting, scan]);
 
+  const onDownloadModel = React.useCallback(async () => {
+    if (!scan?.outputs?.glbUrl || isSubmitting || isExporting || isDownloadingModel) {
+      return;
+    }
+
+    if (Platform.OS !== 'android') {
+      Alert.alert('Not Supported', 'Model download is currently implemented for Android only.');
+      return;
+    }
+
+    const hasPermission = await ensureExportPermission();
+    if (!hasPermission) {
+      Alert.alert('Permission Needed', 'Storage permission is required to save the model file.');
+      return;
+    }
+
+    setIsDownloadingModel(true);
+
+    try {
+      const baseDir = RNFS.DownloadDirectoryPath || RNFS.PicturesDirectoryPath;
+      if (!baseDir) {
+        throw new Error('No public download directory found on this device.');
+      }
+
+      const exportDir = `${baseDir}/MenuScanApp/${scan.id}/model`;
+      await RNFS.mkdir(exportDir);
+
+      const targetPath = `${exportDir}/model.glb`;
+      const apiKey = getApiKey();
+      const headers = apiKey ? { 'X-API-KEY': apiKey } : undefined;
+      const result = await RNFS.downloadFile({
+        fromUrl: scan.outputs.glbUrl,
+        toFile: targetPath,
+        headers,
+      }).promise;
+
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        const exists = await RNFS.exists(targetPath);
+        if (exists) {
+          await RNFS.unlink(targetPath);
+        }
+
+        throw new Error(`Failed to download model (HTTP ${result.statusCode}).`);
+      }
+
+      try {
+        await RNFS.scanFile(targetPath);
+      } catch {
+        // Some Android versions/devices may not support media scan through RNFS typings/runtime.
+      }
+
+      Alert.alert('Model Saved', `GLB model saved to:\n${targetPath}`);
+    } catch (error) {
+      Alert.alert(
+        'Download Failed',
+        error instanceof Error ? error.message : 'Could not download the model.',
+      );
+    } finally {
+      if (mountedRef.current) {
+        setIsDownloadingModel(false);
+      }
+    }
+  }, [ensureExportPermission, isDownloadingModel, isExporting, isSubmitting, scan]);
+
   const backgroundOutputs = useMemo(
     () =>
       Object.values(scan?.bgOutputs ?? {})
@@ -1293,6 +1358,14 @@ export function PreviewScreen({ route, navigation }: Props) {
           {scan.status === 'ready' && scan.outputs?.glbUrl ? (
             <View style={styles.actions}>
               <AppButton
+                title={isDownloadingModel ? 'Downloading GLB...' : 'Download GLB'}
+                variant="primary"
+                onPress={() => {
+                  onDownloadModel().catch(() => undefined);
+                }}
+                disabled={isDownloadingModel || isSubmitting || isExporting}
+              />
+              <AppButton
                 title="Open GLB"
                 variant="secondary"
                 onPress={() => {
@@ -1374,7 +1447,9 @@ export function PreviewScreen({ route, navigation }: Props) {
               onPress={onDiscard}
               disabled={isSubmitting || isExporting}
             />
-            {isSubmitting || isExporting ? <ActivityIndicator color={theme.colors.primary} /> : null}
+            {isSubmitting || isExporting || isDownloadingModel ? (
+              <ActivityIndicator color={theme.colors.primary} />
+            ) : null}
           </View>
         </>
       )}
