@@ -489,7 +489,7 @@ export function PreviewScreen({ route, navigation }: Props) {
         await sleep(availableSlots.length > 0 ? BG_SLOW_POLL_MS : BG_FAST_POLL_MS);
       }
     },
-    [syncBackgroundState],
+    [commitSession, syncBackgroundState],
   );
 
   const pollLegacyBackgroundOutputs = React.useCallback(
@@ -713,15 +713,20 @@ export function PreviewScreen({ route, navigation }: Props) {
           const totalUploads = orderedImages.length;
           let completedUploads = 0;
 
+          await deleteScanBackgroundOutputs(current.id);
+
           current = await commitSession({
             ...current,
+            bgJobId: undefined,
             bgStatus: 'uploading',
             bgProgress: 0,
             bgMessage: 'Uploading images for background removal',
             bgAvailableSlots: [],
             bgPreviewAvailable: false,
+            bgPreviewReadyAt: undefined,
             bgUploadCompleted: 0,
             bgUploadTotal: totalUploads,
+            bgOutputs: undefined,
           });
 
           await runWithConcurrency(orderedImages, BG_UPLOAD_CONCURRENCY, async image => {
