@@ -24,9 +24,9 @@ type LayoutSize = {
   height: number;
 };
 
-const TAP_DEFAULT_SIZE = 0.18;
-const BOX_DEFAULT_WIDTH = 0.36;
-const BOX_DEFAULT_HEIGHT = 0.36;
+const TAP_DEFAULT_SIZE = 0.22;
+const BOX_DEFAULT_WIDTH = 0.4;
+const BOX_DEFAULT_HEIGHT = 0.4;
 const MIN_BOX_SIZE = 0.14;
 const MAX_BOX_SIZE = 0.9;
 const SIZE_STEP = 0.04;
@@ -185,7 +185,7 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
       <View style={styles.panel}>
         <Text style={styles.title}>Select Object First</Text>
         <Text style={styles.subtitle}>
-          Tap the object or switch to Bounding Box mode to place and adjust a box.
+          Tap the object or switch to Bounding Box mode. The guide should tightly frame the object without touching the screen edges.
         </Text>
         <View style={styles.modeRow}>
           <Pressable
@@ -202,6 +202,9 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
 
         <View style={styles.sizePanel}>
           <Text style={styles.sizePanelLabel}>Focus Area</Text>
+          <Text style={styles.sizeHint}>
+            Keep the object large in frame. Tiny subjects usually lead to weak background removal.
+          </Text>
           <View style={styles.sizeControls}>
             <Pressable
               style={[styles.sizeButton, disabled && styles.actionDisabled]}
@@ -361,6 +364,11 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     fontSize: 12,
     fontWeight: '600',
+  },
+  sizeHint: {
+    color: theme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
   },
   sizeControls: {
     flexDirection: 'row',

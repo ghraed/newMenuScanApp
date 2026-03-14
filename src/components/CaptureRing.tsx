@@ -17,34 +17,28 @@ export function CaptureRing({
 }: Props) {
   const capturedSet = useMemo(() => new Set(capturedSlots), [capturedSlots]);
   const radius = size / 2 - 12;
-  const segmentHeight = 14;
-  const segmentWidth = 4;
+  const segmentHeight = slotsTotal > 36 ? 10 : slotsTotal > 24 ? 12 : 14;
+  const segmentWidth = slotsTotal > 36 ? 3 : 4;
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>
       {Array.from({ length: slotsTotal }).map((_, slot) => {
         const isCaptured = capturedSet.has(slot);
         const isActive = activeSlot === slot;
+        const segmentStyle = {
+          width: segmentWidth,
+          height: segmentHeight,
+          left: size / 2 - segmentWidth / 2,
+          top: size / 2 - segmentHeight / 2,
+          backgroundColor: isCaptured ? '#4ADE80' : '#6B7280',
+          opacity: isCaptured ? 1 : 0.75,
+          transform: [{ rotate: `${(360 / slotsTotal) * slot}deg` }, { translateY: -radius }],
+        } as const;
 
         return (
           <View
             key={slot}
-            style={[
-              styles.segmentBase,
-              {
-                width: segmentWidth,
-                height: segmentHeight,
-                left: size / 2 - segmentWidth / 2,
-                top: size / 2 - segmentHeight / 2,
-                backgroundColor: isCaptured ? '#4ADE80' : '#6B7280',
-                opacity: isCaptured ? 1 : 0.75,
-                transform: [
-                  { rotate: `${(360 / slotsTotal) * slot}deg` },
-                  { translateY: -radius },
-                ],
-              },
-              isActive && styles.activeSegment,
-            ]}
+            style={[styles.segmentBase, segmentStyle, isActive && styles.activeSegment]}
           />
         );
       })}

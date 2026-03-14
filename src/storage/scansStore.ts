@@ -1,5 +1,6 @@
 import RNFS from 'react-native-fs';
 import { createMMKV } from 'react-native-mmkv';
+import { getDefaultCapturePattern } from '../lib/captureGuidance';
 import { createUuid } from '../utils/uuid';
 import { ScanSession } from '../types/scanSession';
 
@@ -7,8 +8,10 @@ const storage = createMMKV({ id: 'scans-storage' });
 
 const SCANS_STORAGE_KEY = 'scans:sessions:v1';
 const DEFAULT_SCALE_METERS = 0.24;
-const DEFAULT_SLOTS_TOTAL = 24;
+const DEFAULT_SLOTS_TOTAL = getDefaultCapturePattern().totalShots;
 const SCANS_ROOT_PATH = `${RNFS.DocumentDirectoryPath}/scans`;
+let scansRootEnsured = false;
+const ensuredScanDirectoryIds = new Set<string>();
 
 function parseSessions(raw: string | undefined): ScanSession[] {
   if (!raw) {
@@ -38,11 +41,25 @@ async function ensureDir(path: string) {
   }
 }
 
-async function ensureScanDirectories(scanId: string) {
+async function ensureScansRootDir() {
+  if (scansRootEnsured) {
+    return;
+  }
+
   await ensureDir(SCANS_ROOT_PATH);
+  scansRootEnsured = true;
+}
+
+async function ensureScanDirectories(scanId: string) {
+  if (ensuredScanDirectoryIds.has(scanId)) {
+    return;
+  }
+
+  await ensureScansRootDir();
   await ensureDir(getScanDirectoryPath(scanId));
   await ensureDir(getScanImagesDirectoryPath(scanId));
   await ensureDir(getScanBgDirectoryPath(scanId));
+  ensuredScanDirectoryIds.add(scanId);
 }
 
 function sortSessionsNewestFirst(sessions: ScanSession[]) {
@@ -83,13 +100,14 @@ export async function ensureScanSessionDirectories(scanId: string) {
 
 export async function createScanSession(
   scaleMeters: number = DEFAULT_SCALE_METERS,
+  slotsTotal: number = DEFAULT_SLOTS_TOTAL,
 ): Promise<ScanSession> {
   const session: ScanSession = {
     id: createUuid(),
     createdAt: Date.now(),
     targetType: 'dish',
     scaleMeters,
-    slotsTotal: DEFAULT_SLOTS_TOTAL,
+    slotsTotal,
     images: [],
     status: 'draft',
   };
@@ -138,6 +156,8 @@ export async function deleteScanSession(id: string): Promise<void> {
   if (exists) {
     await RNFS.unlink(scanDirPath);
   }
+
+  ensuredScanDirectoryIds.delete(id);
 }
 
 export async function deleteScanBackgroundOutputs(scanId: string): Promise<void> {
