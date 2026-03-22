@@ -19,10 +19,16 @@ export type ObjectSelectionPoint = {
   y: number;
 };
 
+export type ObjectSelectionViewport = {
+  width: number;
+  height: number;
+};
+
 export type ObjectSelection = {
   method: ObjectSelectionMethod;
   bbox: ObjectSelectionRect;
   point?: ObjectSelectionPoint;
+  viewportSize?: ObjectSelectionViewport;
   selectedAt: number;
 };
 

@@ -109,6 +109,7 @@ function buildSelectionPayload(selection?: ObjectSelection) {
     method: selection.method,
     bbox: selection.bbox,
     point: selection.point,
+    viewportSize: selection.viewportSize,
     selectedAt: selection.selectedAt,
   };
 }

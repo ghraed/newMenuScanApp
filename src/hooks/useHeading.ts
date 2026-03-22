@@ -37,6 +37,12 @@ type NativeHeadingModule = {
 
 const HEADING_SAMPLE_EVENT = 'HeadingSensorSample';
 const headingSensorModule = NativeModules.HeadingSensorModule as NativeHeadingModule | undefined;
+const INITIAL_HEADING_STATE: HeadingState = {
+  heading: 0,
+  headingRateDegPerSec: 0,
+  stableForMs: 0,
+};
+const HEADING_STATE_PUBLISH_INTERVAL_MS = 80;
 
 function createAndroidSensorHeadingProvider(): HeadingProvider | null {
   if (Platform.OS !== 'android' || !headingSensorModule?.start || !headingSensorModule?.stop) {
@@ -106,21 +112,27 @@ export function useHeading({
   provider = defaultProvider,
   stableRateThresholdDegPerSec = 8,
 }: UseHeadingOptions = {}): HeadingState {
-  const [state, setState] = useState<HeadingState>({
-    heading: 0,
-    headingRateDegPerSec: 0,
-    stableForMs: 0,
-  });
+  const [state, setState] = useState<HeadingState>(INITIAL_HEADING_STATE);
 
   const lastSampleRef = useRef<HeadingSample | null>(null);
   const stableSinceRef = useRef<number | null>(null);
+  const providerRef = useRef(provider);
+  const stableRateThresholdRef = useRef(stableRateThresholdDegPerSec);
+  const latestDerivedStateRef = useRef<HeadingState>(INITIAL_HEADING_STATE);
+
+  providerRef.current = provider;
+  stableRateThresholdRef.current = stableRateThresholdDegPerSec;
 
   useEffect(() => {
     if (!enabled) {
+      lastSampleRef.current = null;
+      stableSinceRef.current = null;
+      latestDerivedStateRef.current = INITIAL_HEADING_STATE;
+      setState(prevState => (prevState === INITIAL_HEADING_STATE ? prevState : INITIAL_HEADING_STATE));
       return;
     }
 
-    const stop = provider.start(sample => {
+    const stop = providerRef.current.start(sample => {
       const prev = lastSampleRef.current;
       let rate = 0;
 
@@ -130,7 +142,7 @@ export function useHeading({
         rate = Math.abs(delta / dtSec);
       }
 
-      const isStable = rate <= stableRateThresholdDegPerSec;
+      const isStable = rate <= stableRateThresholdRef.current;
       if (isStable) {
         stableSinceRef.current ??= sample.timestamp;
       } else {
@@ -138,21 +150,36 @@ export function useHeading({
       }
 
       const stableForMs = stableSinceRef.current ? sample.timestamp - stableSinceRef.current : 0;
-
-      lastSampleRef.current = sample;
-      setState({
+      latestDerivedStateRef.current = {
         heading: normalizeHeading(sample.heading),
         headingRateDegPerSec: rate,
         stableForMs,
-      });
+      };
+      lastSampleRef.current = sample;
     });
 
+    const publishTimer = setInterval(() => {
+      const nextState = latestDerivedStateRef.current;
+      setState(prevState => {
+        if (
+          prevState.heading === nextState.heading &&
+          prevState.headingRateDegPerSec === nextState.headingRateDegPerSec &&
+          prevState.stableForMs === nextState.stableForMs
+        ) {
+          return prevState;
+        }
+
+        return nextState;
+      });
+    }, HEADING_STATE_PUBLISH_INTERVAL_MS);
+
     return () => {
+      clearInterval(publishTimer);
       stop();
       lastSampleRef.current = null;
       stableSinceRef.current = null;
     };
-  }, [enabled, provider, stableRateThresholdDegPerSec]);
+  }, [enabled]);
 
   return state;
 }

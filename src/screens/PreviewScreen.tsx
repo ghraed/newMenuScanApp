@@ -26,6 +26,10 @@ import {
   buildRgbaUrl,
 } from '../api/scansApi';
 import { getApiKey } from '../api/config';
+import {
+  cropFileToSelectionInPlace,
+  getSelectionUploadUri,
+} from '../lib/objectSelectionImage';
 import { theme } from '../lib/theme';
 import {
   deleteScanBackgroundOutputs,
@@ -215,13 +219,14 @@ export function PreviewScreen({ route, navigation }: Props) {
 
       while (attempt <= retries) {
         try {
+          const imageUri = await getSelectionUploadUri(image.path, objectSelection);
           await apiUploadImage({
             scanId: remoteScanId,
             slot: image.slot,
             heading: image.heading,
             objectSelection,
             image: {
-              uri: image.path.startsWith('file://') ? image.path : `file://${image.path}`,
+              uri: imageUri,
               name: `${image.slot}.jpg`,
               type: 'image/jpeg',
             },
@@ -353,7 +358,12 @@ export function PreviewScreen({ route, navigation }: Props) {
       }
 
       const exists = await RNFS.exists(targetPath);
-      return exists ? targetPath : null;
+      if (!exists) {
+        return null;
+      }
+
+      await cropFileToSelectionInPlace(targetPath, session.objectSelection);
+      return targetPath;
     },
     [],
   );
@@ -876,6 +886,7 @@ export function PreviewScreen({ route, navigation }: Props) {
         }
 
         await RNFS.copyFile(sourcePath, targetPath);
+        await cropFileToSelectionInPlace(targetPath, scan.objectSelection);
         exportedPaths.push(targetPath);
       }
 

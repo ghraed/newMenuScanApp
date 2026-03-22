@@ -8,11 +8,8 @@ import {
   View,
 } from 'react-native';
 import { theme } from '../lib/theme';
-import {
-  ObjectSelection,
-  ObjectSelectionMethod,
-  ObjectSelectionRect,
-} from '../types/scanSession';
+import { ObjectSelection, ObjectSelectionRect } from '../types/scanSession';
+import { AppButton } from './AppButton';
 
 type Props = {
   onConfirm: (selection: ObjectSelection) => void;
@@ -24,9 +21,7 @@ type LayoutSize = {
   height: number;
 };
 
-const TAP_DEFAULT_SIZE = 0.22;
-const BOX_DEFAULT_WIDTH = 0.4;
-const BOX_DEFAULT_HEIGHT = 0.4;
+const DEFAULT_SELECTION_SIZE = 0.26;
 const MIN_BOX_SIZE = 0.14;
 const MAX_BOX_SIZE = 0.9;
 const SIZE_STEP = 0.04;
@@ -35,17 +30,38 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function buildCenteredBox(centerX: number, centerY: number, size: number): ObjectSelectionRect {
+  const nextSize = clamp(size, MIN_BOX_SIZE, MAX_BOX_SIZE);
+  return {
+    x: clamp(centerX - nextSize / 2, 0, 1 - nextSize),
+    y: clamp(centerY - nextSize / 2, 0, 1 - nextSize),
+    width: nextSize,
+    height: nextSize,
+  };
+}
+
 export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
-  const [mode, setMode] = useState<ObjectSelectionMethod>('tap');
   const [layout, setLayout] = useState<LayoutSize>({ width: 0, height: 0 });
   const [bbox, setBbox] = useState<ObjectSelectionRect | null>(null);
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
+  const [selectionStarted, setSelectionStarted] = useState(false);
+  const [instructionsVisible, setInstructionsVisible] = useState(true);
   const dragStartRef = useRef<ObjectSelectionRect | null>(null);
-  const resizeStartRef = useRef<ObjectSelectionRect | null>(null);
 
   const hasLayout = layout.width > 0 && layout.height > 0;
-  const canConfirm = Boolean(hasLayout && bbox && !disabled);
-  const focusSizeLabel = bbox ? `${Math.round(Math.max(bbox.width, bbox.height) * 100)}%` : 'Not set';
+  const hasSelection = Boolean(bbox);
+  const canConfirm = Boolean(selectionStarted && hasLayout && bbox && !disabled);
+  const focusSizeLabel = bbox
+    ? `${Math.round(Math.max(bbox.width, bbox.height) * 100)}%`
+    : `${Math.round(DEFAULT_SELECTION_SIZE * 100)}%`;
+
+  const setSelection = (nextBbox: ObjectSelectionRect) => {
+    setBbox(nextBbox);
+    setPoint({
+      x: nextBbox.x + nextBbox.width / 2,
+      y: nextBbox.y + nextBbox.height / 2,
+    });
+  };
 
   const resizeBboxAroundCenter = (delta: number) => {
     if (!bbox) {
@@ -54,17 +70,8 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
 
     const centerX = bbox.x + bbox.width / 2;
     const centerY = bbox.y + bbox.height / 2;
-    const nextWidth = clamp(bbox.width + delta, MIN_BOX_SIZE, MAX_BOX_SIZE);
-    const nextHeight = clamp(bbox.height + delta, MIN_BOX_SIZE, MAX_BOX_SIZE);
-    const nextX = clamp(centerX - nextWidth / 2, 0, 1 - nextWidth);
-    const nextY = clamp(centerY - nextHeight / 2, 0, 1 - nextHeight);
-
-    setBbox({
-      x: nextX,
-      y: nextY,
-      width: nextWidth,
-      height: nextHeight,
-    });
+    const nextBox = buildCenteredBox(centerX, centerY, bbox.width + delta);
+    setSelection(nextBox);
   };
 
   const setBoxFromTap = (xPx: number, yPx: number) => {
@@ -72,16 +79,11 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
       return;
     }
 
-    const width = mode === 'tap' ? TAP_DEFAULT_SIZE : BOX_DEFAULT_WIDTH;
-    const height = mode === 'tap' ? TAP_DEFAULT_SIZE : BOX_DEFAULT_HEIGHT;
-    const x = clamp(xPx / layout.width - width / 2, 0, 1 - width);
-    const y = clamp(yPx / layout.height - height / 2, 0, 1 - height);
+    const centerX = clamp(xPx / layout.width, 0, 1);
+    const centerY = clamp(yPx / layout.height, 0, 1);
+    const nextSize = bbox ? Math.max(bbox.width, bbox.height) : DEFAULT_SELECTION_SIZE;
 
-    setPoint({
-      x: clamp(xPx / layout.width, 0, 1),
-      y: clamp(yPx / layout.height, 0, 1),
-    });
-    setBbox({ x, y, width, height });
+    setSelection(buildCenteredBox(centerX, centerY, nextSize));
   };
 
   const onLayout = (event: LayoutChangeEvent) => {
@@ -92,7 +94,7 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
   const dragResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => mode === 'box' && Boolean(bbox) && !disabled,
+        onStartShouldSetPanResponder: () => selectionStarted && Boolean(bbox) && !disabled,
         onPanResponderGrant: () => {
           dragStartRef.current = bbox;
         },
@@ -101,49 +103,19 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
             return;
           }
 
-          const dx = gestureState.dx / layout.width;
-          const dy = gestureState.dy / layout.height;
           const start = dragStartRef.current;
-          const x = clamp(start.x + dx, 0, 1 - start.width);
-          const y = clamp(start.y + dy, 0, 1 - start.height);
-          setBbox({ ...start, x, y });
+          const x = clamp(start.x + gestureState.dx / layout.width, 0, 1 - start.width);
+          const y = clamp(start.y + gestureState.dy / layout.height, 0, 1 - start.height);
+          setSelection({ ...start, x, y });
         },
         onPanResponderRelease: () => {
           dragStartRef.current = null;
         },
-      }),
-    [bbox, disabled, hasLayout, layout.height, layout.width, mode],
-  );
-
-  const resizeResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => mode === 'box' && Boolean(bbox) && !disabled,
-        onPanResponderGrant: () => {
-          resizeStartRef.current = bbox;
-        },
-        onPanResponderMove: (_, gestureState) => {
-          if (!resizeStartRef.current || !hasLayout) {
-            return;
-          }
-
-          const start = resizeStartRef.current;
-          const maxWidth = Math.min(MAX_BOX_SIZE, 1 - start.x);
-          const maxHeight = Math.min(MAX_BOX_SIZE, 1 - start.y);
-          const width = clamp(start.width + gestureState.dx / layout.width, MIN_BOX_SIZE, maxWidth);
-          const height = clamp(
-            start.height + gestureState.dy / layout.height,
-            MIN_BOX_SIZE,
-            maxHeight,
-          );
-
-          setBbox({ ...start, width, height });
-        },
-        onPanResponderRelease: () => {
-          resizeStartRef.current = null;
+        onPanResponderTerminate: () => {
+          dragStartRef.current = null;
         },
       }),
-    [bbox, disabled, hasLayout, layout.height, layout.width, mode],
+    [bbox, disabled, hasLayout, layout.height, layout.width, selectionStarted],
   );
 
   const boxStyle = bbox
@@ -155,111 +127,133 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
       }
     : undefined;
 
+  const confirmSelection = () => {
+    if (!bbox) {
+      return;
+    }
+
+    onConfirm({
+      method: 'box',
+      bbox,
+      point: point ?? {
+        x: bbox.x + bbox.width / 2,
+        y: bbox.y + bbox.height / 2,
+      },
+      viewportSize: {
+        width: layout.width,
+        height: layout.height,
+      },
+      selectedAt: Date.now(),
+    });
+  };
+
   return (
     <View style={styles.root} pointerEvents="box-none">
-      <Pressable
-        style={styles.touchLayer}
-        onLayout={onLayout}
-        onPress={event => {
-          setBoxFromTap(event.nativeEvent.locationX, event.nativeEvent.locationY);
-        }}
-      />
+      <View style={styles.selectionSurface} pointerEvents={selectionStarted ? 'auto' : 'none'}>
+        <Pressable
+          style={styles.touchLayer}
+          onLayout={onLayout}
+          onPress={event => {
+            setBoxFromTap(event.nativeEvent.locationX, event.nativeEvent.locationY);
+          }}
+          disabled={!selectionStarted || disabled}
+        />
 
-      {bbox ? (
-        <View
-          style={[styles.box, boxStyle, mode === 'box' && styles.boxEditable]}
-          {...(mode === 'box' ? dragResponder.panHandlers : {})}>
-          <View style={styles.boxLabel}>
-            <Text style={styles.boxLabelText}>
-              {mode === 'tap' ? 'Tap selection' : 'Bounding box'}
+        {bbox ? (
+          <View style={[styles.box, boxStyle]} {...dragResponder.panHandlers}>
+            <View style={styles.boxLabel}>
+              <Text style={styles.boxLabelText}>Drag to reposition</Text>
+            </View>
+          </View>
+        ) : null}
+      </View>
+
+      {selectionStarted ? (
+        <Pressable
+          style={[styles.infoButton, disabled && styles.actionDisabled]}
+          onPress={() => setInstructionsVisible(true)}
+          disabled={disabled}>
+          <Text style={styles.infoButtonText}>i</Text>
+        </Pressable>
+      ) : null}
+
+      {selectionStarted ? (
+        <View style={styles.selectionControls} pointerEvents="box-none">
+          <View style={styles.hintCard}>
+            <Text style={styles.hintTitle}>{hasSelection ? 'Adjust The Selection' : 'Tap The Object'}</Text>
+            <Text style={styles.hintText}>
+              {hasSelection
+                ? 'Use the circle buttons to tighten or loosen the guide, then confirm.'
+                : 'Tap the object to place the guide. Keep it large in frame and away from the screen edges.'}
             </Text>
           </View>
-          {mode === 'box' ? (
-            <View style={styles.resizeHandle} {...resizeResponder.panHandlers}>
-              <View style={styles.resizeHandleDot} />
+
+          <View style={styles.bottomCard}>
+            <View style={styles.resizeRow}>
+              <Pressable
+                style={[styles.circleButton, (!bbox || disabled) && styles.actionDisabled]}
+                onPress={() => resizeBboxAroundCenter(-SIZE_STEP)}
+                disabled={!bbox || disabled}>
+                <Text style={styles.circleButtonText}>-</Text>
+              </Pressable>
+              <View style={styles.sizeBadge}>
+                <Text style={styles.sizeBadgeLabel}>Selection</Text>
+                <Text style={styles.sizeBadgeValue}>{focusSizeLabel}</Text>
+              </View>
+              <Pressable
+                style={[styles.circleButton, (!bbox || disabled) && styles.actionDisabled]}
+                onPress={() => resizeBboxAroundCenter(SIZE_STEP)}
+                disabled={!bbox || disabled}>
+                <Text style={styles.circleButtonText}>+</Text>
+              </Pressable>
             </View>
-          ) : null}
+
+            <View style={styles.actionRow}>
+              <Pressable
+                style={[styles.resetButton, disabled && styles.actionDisabled]}
+                onPress={() => {
+                  setBbox(null);
+                  setPoint(null);
+                }}
+                disabled={disabled}>
+                <Text style={styles.resetButtonText}>Reset</Text>
+              </Pressable>
+            </View>
+
+            {bbox ? (
+              <AppButton
+                title={disabled ? 'Saving...' : 'Confirm Object'}
+                onPress={confirmSelection}
+                disabled={!canConfirm}
+              />
+            ) : null}
+          </View>
         </View>
       ) : null}
 
-      <View style={styles.panel}>
-        <Text style={styles.title}>Select Object First</Text>
-        <Text style={styles.subtitle}>
-          Tap the object or switch to Bounding Box mode. The guide should tightly frame the object without touching the screen edges.
-        </Text>
-        <View style={styles.modeRow}>
-          <Pressable
-            style={[styles.modeButton, mode === 'tap' && styles.modeButtonActive]}
-            onPress={() => setMode('tap')}>
-            <Text style={styles.modeButtonText}>Tap Object</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.modeButton, mode === 'box' && styles.modeButtonActive]}
-            onPress={() => setMode('box')}>
-            <Text style={styles.modeButtonText}>Bounding Box</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.sizePanel}>
-          <Text style={styles.sizePanelLabel}>Focus Area</Text>
-          <Text style={styles.sizeHint}>
-            Keep the object large in frame. Tiny subjects usually lead to weak background removal.
-          </Text>
-          <View style={styles.sizeControls}>
-            <Pressable
-              style={[styles.sizeButton, disabled && styles.actionDisabled]}
+      {instructionsVisible ? (
+        <View style={styles.instructionsScrim}>
+          <View style={styles.instructionsCard}>
+            <Text style={styles.instructionsEyebrow}>Before Capture</Text>
+            <Text style={styles.instructionsTitle}>Select The Object First</Text>
+            <Text style={styles.instructionsBody}>
+              Move the camera until the object fills most of the screen without touching the edges.
+            </Text>
+            <Text style={styles.instructionsStep}>1. Tap Start Selection.</Text>
+            <Text style={styles.instructionsStep}>2. Tap the object to place the guide.</Text>
+            <Text style={styles.instructionsStep}>3. Use - and + to adjust the guide size.</Text>
+            <Text style={styles.instructionsStep}>4. Confirm the object, then begin capturing.</Text>
+            <AppButton
+              title={selectionStarted ? 'Continue Selection' : 'Start Selection'}
               onPress={() => {
-                resizeBboxAroundCenter(-SIZE_STEP);
+                setSelectionStarted(true);
+                setInstructionsVisible(false);
               }}
-              disabled={disabled || !bbox}>
-              <Text style={styles.sizeButtonText}>Smaller</Text>
-            </Pressable>
-            <Text style={styles.sizeValue}>{focusSizeLabel}</Text>
-            <Pressable
-              style={[styles.sizeButton, disabled && styles.actionDisabled]}
-              onPress={() => {
-                resizeBboxAroundCenter(SIZE_STEP);
-              }}
-              disabled={disabled || !bbox}>
-              <Text style={styles.sizeButtonText}>Bigger</Text>
-            </Pressable>
+              disabled={disabled}
+            />
           </View>
         </View>
-
-        <View style={styles.actionsRow}>
-          <Pressable
-            style={styles.secondaryAction}
-            onPress={() => {
-              setBbox(null);
-              setPoint(null);
-            }}
-            disabled={disabled}>
-            <Text style={styles.secondaryActionText}>Reset</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.primaryAction, !canConfirm && styles.actionDisabled]}
-            onPress={() => {
-              if (!bbox) {
-                return;
-              }
-              onConfirm({
-                method: mode,
-                bbox,
-                point:
-                  mode === 'tap' && point
-                    ? point
-                    : {
-                        x: bbox.x + bbox.width / 2,
-                        y: bbox.y + bbox.height / 2,
-                      },
-                selectedAt: Date.now(),
-              });
-            }}
-            disabled={!canConfirm}>
-            <Text style={styles.primaryActionText}>Confirm Object</Text>
-          </Pressable>
-        </View>
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -268,167 +262,183 @@ const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFillObject,
   },
+  selectionSurface: {
+    ...StyleSheet.absoluteFillObject,
+  },
   touchLayer: {
     ...StyleSheet.absoluteFillObject,
   },
   box: {
     position: 'absolute',
     borderWidth: 2,
-    borderColor: theme.colors.primary,
-    backgroundColor: 'rgba(92,180,255,0.12)',
-    borderRadius: theme.radius.md,
-  },
-  boxEditable: {
-    borderStyle: 'dashed',
+    borderColor: '#8FDFFF',
+    backgroundColor: 'rgba(143,223,255,0.16)',
+    borderRadius: theme.radius.lg,
+    shadowColor: '#8FDFFF',
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 4,
   },
   boxLabel: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(11,16,32,0.86)',
+    margin: theme.spacing.xs,
     paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 2,
-    borderBottomRightRadius: theme.radius.sm,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(11,16,32,0.84)',
   },
   boxLabelText: {
     color: theme.colors.text,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  resizeHandle: {
+  infoButton: {
     position: 'absolute',
-    right: -10,
-    bottom: -10,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#0B1020',
-    borderColor: theme.colors.primary,
-    borderWidth: 1,
+    top: 72,
+    right: theme.spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(11,16,32,0.9)',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
-  resizeHandleDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 6,
-    backgroundColor: theme.colors.primary,
+  infoButtonText: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
   },
-  panel: {
+  selectionControls: {
     position: 'absolute',
     left: theme.spacing.md,
     right: theme.spacing.md,
-    top: 62,
-    backgroundColor: 'rgba(11,16,32,0.88)',
-    borderColor: theme.colors.border,
-    borderWidth: 1,
+    bottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  hintCard: {
+    alignSelf: 'stretch',
     borderRadius: theme.radius.lg,
-    padding: theme.spacing.md,
-    gap: theme.spacing.sm,
-  },
-  title: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  subtitle: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  modeRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  modeButton: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radius.md,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-  },
-  modeButtonActive: {
-    borderColor: theme.colors.primary,
-    backgroundColor: 'rgba(92,180,255,0.22)',
-  },
-  modeButtonText: {
-    color: theme.colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  sizePanel: {
+    borderColor: 'rgba(143,223,255,0.36)',
+    backgroundColor: 'rgba(8,17,34,0.82)',
+    padding: theme.spacing.md,
     gap: theme.spacing.xs,
   },
-  sizePanelLabel: {
+  hintTitle: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  hintText: {
     color: theme.colors.textMuted,
     fontSize: 12,
-    fontWeight: '600',
+    lineHeight: 18,
   },
-  sizeHint: {
-    color: theme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
+  bottomCard: {
+    borderRadius: theme.radius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: 'rgba(11,16,32,0.9)',
+    padding: theme.spacing.md,
+    gap: theme.spacing.md,
   },
-  sizeControls: {
+  resizeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.sm,
+    justifyContent: 'center',
+    gap: theme.spacing.md,
   },
-  sizeButton: {
-    minWidth: 88,
+  circleButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceAlt,
   },
-  sizeButtonText: {
+  circleButtonText: {
     color: theme.colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  sizeValue: {
-    flex: 1,
-    color: theme.colors.text,
-    fontSize: 13,
+    fontSize: 28,
     fontWeight: '700',
-    textAlign: 'center',
+    lineHeight: 30,
   },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  secondaryAction: {
+  sizeBadge: {
+    minWidth: 112,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
+    gap: 2,
+  },
+  sizeBadgeLabel: {
+    color: theme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sizeBadgeValue: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  resetButton: {
     paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceAlt,
   },
-  secondaryActionText: {
+  resetButtonText: {
     color: theme.colors.text,
     fontSize: 13,
     fontWeight: '600',
   },
-  primaryAction: {
-    flex: 1,
+  instructionsScrim: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.primary,
+    backgroundColor: 'rgba(2,6,14,0.64)',
+    padding: theme.spacing.lg,
   },
-  primaryActionText: {
-    color: '#0B1020',
-    fontSize: 13,
+  instructionsCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: theme.radius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: 'rgba(11,16,32,0.96)',
+    padding: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  instructionsEyebrow: {
+    color: '#8FDFFF',
+    fontSize: 12,
     fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  instructionsTitle: {
+    color: theme.colors.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  instructionsBody: {
+    color: '#E8ECFA',
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  instructionsStep: {
+    color: theme.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
   },
   actionDisabled: {
     opacity: 0.45,

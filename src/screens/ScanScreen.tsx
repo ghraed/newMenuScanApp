@@ -176,7 +176,7 @@ export function ScanScreen({ route, navigation }: Props) {
         tone: 'info',
         title: 'Select The Object First',
         message:
-          'Frame the object tightly before scanning. Keep it away from the screen edges so the guide can enforce clean captures.',
+          'Tap Start Selection, place the guide on the object, then use - and + to size it before confirming.',
       };
     }
 
@@ -323,7 +323,7 @@ export function ScanScreen({ route, navigation }: Props) {
           <Text style={styles.hudSubtitle}>
             {hasObjectSelection
               ? `${capturedCount}/${slotsTotal} photos captured. ${activeStage ? `${activeStage.title}: ${activeStage.capturedCount}/${activeStage.shots}.` : 'All stages completed.'}`
-              : 'Tap the object and keep it large in frame before scanning.'}
+              : 'Read the framing tips, tap Start Selection, then place the guide around the object.'}
           </Text>
           {hasObjectSelection && activeStage ? (
             <Text style={styles.hudSlotStatus}>
