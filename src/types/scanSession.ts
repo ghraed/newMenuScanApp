@@ -5,6 +5,9 @@ export type ScanImageSlot = {
   timestamp: number;
 };
 
+export type ScanTargetType = 'dish' | 'juice';
+export type ScanCaptureMode = 'orbit' | 'turntable';
+
 export type ObjectSelectionMethod = 'tap' | 'box';
 
 export type ObjectSelectionRect = {
@@ -60,7 +63,8 @@ export type ScanSessionStatus =
 export type ScanSession = {
   id: string;
   createdAt: number;
-  targetType: 'dish';
+  targetType: ScanTargetType;
+  captureMode: ScanCaptureMode;
   scaleMeters: number;
   slotsTotal: number;
   images: ScanImageSlot[];

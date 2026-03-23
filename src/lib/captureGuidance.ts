@@ -1,4 +1,4 @@
-import { ObjectSelection } from '../types/scanSession';
+import { ObjectSelection, ObjectSelectionRect } from '../types/scanSession';
 
 export type CaptureStageId = 'middle' | 'low' | 'high';
 
@@ -39,10 +39,72 @@ export type SelectionValidationIssue = {
   message: string;
 };
 
+export type AutoCaptureIssue =
+  | 'complete'
+  | 'stage_locked'
+  | 'slot_captured'
+  | 'align_to_marker'
+  | 'move_to_next_angle'
+  | 'hold_steady'
+  | 'cooldown'
+  | 'capturing'
+  | 'camera_unavailable';
+
+export type CaptureTarget = {
+  slot: number;
+  stageSlotIndex: number;
+  targetHeading: number;
+  targetDeltaDeg: number;
+  distanceDeg: number;
+};
+
+export type CaptureGuidanceState = {
+  currentStage: CaptureStageProgress | null;
+  currentSlot: number | null;
+  currentStageSlotIndex: number | null;
+  currentSlotCaptured: boolean;
+  targetSlot: number | null;
+  targetStageSlotIndex: number | null;
+  targetHeading: number | null;
+  targetDeltaDeg: number | null;
+  targetAlignmentProgress: number;
+  nearCenter: boolean;
+  stableEnough: boolean;
+  movedEnough: boolean;
+  canCapture: boolean;
+  issue: AutoCaptureIssue | null;
+  allCaptured: boolean;
+};
+
+type EvaluateCaptureGuidanceParams = {
+  pattern: CapturePattern;
+  capturedSlots: number[];
+  heading: number;
+  stableForMs: number;
+  stageReady: boolean;
+  lastCapturedHeading: number | null;
+  peakHeadingRateSinceCapture: number;
+  now: number;
+  lastAcceptedAt: number;
+  isCapturing: boolean;
+  hasCamera: boolean;
+  acceptIntervalMs?: number;
+  stableRequiredMs?: number;
+  slotCenterWindowRatio?: number;
+  minMovementSlotRatio?: number;
+  minMovementRateDegPerSec?: number;
+};
+
 const MIN_SELECTION_DIMENSION = 0.2;
 const MIN_SELECTION_AREA = 0.04;
 const MAX_SELECTION_DIMENSION = 0.74;
 const MIN_SELECTION_MARGIN = 0.05;
+const DEFAULT_ACCEPT_INTERVAL_MS = 450;
+const DEFAULT_STABLE_REQUIRED_MS = 280;
+const DEFAULT_SLOT_CENTER_WINDOW_RATIO = 0.42;
+const DEFAULT_MIN_MOVEMENT_SLOT_RATIO = 0.35;
+const DEFAULT_MIN_MOVEMENT_RATE_DEG_PER_SEC = 1.2;
+const DEFAULT_GHOST_BOX_MAX_SHIFT_RATIO = 0.9;
 
 export const CAPTURE_PATTERNS: CapturePattern[] = [
   {
@@ -224,6 +286,208 @@ export function getActiveCaptureStage(
   capturedSlots: number[],
 ): CaptureStageProgress | null {
   return getCaptureStageProgress(pattern, capturedSlots).find(stage => !stage.complete) ?? null;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function normalizeHeading(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+export function shortestHeadingDelta(next: number, prev: number) {
+  return ((next - prev + 540) % 360) - 180;
+}
+
+export function absoluteHeadingDistance(next: number, prev: number) {
+  return Math.abs(shortestHeadingDelta(next, prev));
+}
+
+export function getStageSlotIndexFromHeading(heading: number, shots: number) {
+  const safeShots = Math.max(1, shots);
+  const normalized = normalizeHeading(heading);
+  return Math.floor((normalized % 360) / (360 / safeShots));
+}
+
+export function getStageSlotCenterHeading(stageSlotIndex: number, shots: number) {
+  const safeShots = Math.max(1, shots);
+  const slotWidth = 360 / safeShots;
+  return normalizeHeading((stageSlotIndex + 0.5) * slotWidth);
+}
+
+export function isHeadingNearStageSlotCenter(
+  heading: number,
+  stageSlotIndex: number,
+  shots: number,
+  centerWindowRatio = DEFAULT_SLOT_CENTER_WINDOW_RATIO,
+) {
+  const slotWidth = 360 / Math.max(1, shots);
+  const center = getStageSlotCenterHeading(stageSlotIndex, shots);
+  return absoluteHeadingDistance(heading, center) <= slotWidth * centerWindowRatio;
+}
+
+export function getNearestUncapturedStageTarget(
+  heading: number,
+  stage: CaptureStageProgress,
+  capturedSlots: number[],
+): CaptureTarget | null {
+  const capturedSet = new Set(capturedSlots);
+  let bestTarget: CaptureTarget | null = null;
+
+  for (let stageSlotIndex = 0; stageSlotIndex < stage.shots; stageSlotIndex += 1) {
+    const slot = stage.slotStart + stageSlotIndex;
+    if (capturedSet.has(slot)) {
+      continue;
+    }
+
+    const targetHeading = getStageSlotCenterHeading(stageSlotIndex, stage.shots);
+    const targetDeltaDeg = shortestHeadingDelta(targetHeading, heading);
+    const distanceDeg = Math.abs(targetDeltaDeg);
+    const isBetterTarget =
+      !bestTarget ||
+      distanceDeg < bestTarget.distanceDeg ||
+      (distanceDeg === bestTarget.distanceDeg && stageSlotIndex < bestTarget.stageSlotIndex);
+
+    if (isBetterTarget) {
+      bestTarget = {
+        slot,
+        stageSlotIndex,
+        targetHeading,
+        targetDeltaDeg,
+        distanceDeg,
+      };
+    }
+  }
+
+  return bestTarget;
+}
+
+export function getTargetAlignmentProgress(targetDeltaDeg: number | null, shots: number) {
+  if (targetDeltaDeg === null) {
+    return 0;
+  }
+
+  const slotWidth = 360 / Math.max(1, shots);
+  return 1 - clamp(Math.abs(targetDeltaDeg) / slotWidth, 0, 1);
+}
+
+export function getGhostGuideBoxRect(
+  bbox: ObjectSelectionRect,
+  targetDeltaDeg: number,
+  shots: number,
+  maxShiftRatio = DEFAULT_GHOST_BOX_MAX_SHIFT_RATIO,
+): ObjectSelectionRect {
+  const direction = targetDeltaDeg === 0 ? 0 : targetDeltaDeg > 0 ? 1 : -1;
+  const distanceRatio = 1 - getTargetAlignmentProgress(targetDeltaDeg, shots);
+  const desiredShift = bbox.width * maxShiftRatio * distanceRatio;
+  const availableShift = direction > 0 ? 1 - (bbox.x + bbox.width) : bbox.x;
+  const shift = Math.min(desiredShift, availableShift) * direction;
+
+  return {
+    ...bbox,
+    x: clamp(bbox.x + shift, 0, 1 - bbox.width),
+  };
+}
+
+export function evaluateCaptureGuidanceState({
+  pattern,
+  capturedSlots,
+  heading,
+  stableForMs,
+  stageReady,
+  lastCapturedHeading,
+  peakHeadingRateSinceCapture,
+  now,
+  lastAcceptedAt,
+  isCapturing,
+  hasCamera,
+  acceptIntervalMs = DEFAULT_ACCEPT_INTERVAL_MS,
+  stableRequiredMs = DEFAULT_STABLE_REQUIRED_MS,
+  slotCenterWindowRatio = DEFAULT_SLOT_CENTER_WINDOW_RATIO,
+  minMovementSlotRatio = DEFAULT_MIN_MOVEMENT_SLOT_RATIO,
+  minMovementRateDegPerSec = DEFAULT_MIN_MOVEMENT_RATE_DEG_PER_SEC,
+}: EvaluateCaptureGuidanceParams): CaptureGuidanceState {
+  const currentStage = getActiveCaptureStage(pattern, capturedSlots);
+
+  if (!currentStage) {
+    return {
+      currentStage: null,
+      currentSlot: null,
+      currentStageSlotIndex: null,
+      currentSlotCaptured: false,
+      targetSlot: null,
+      targetStageSlotIndex: null,
+      targetHeading: null,
+      targetDeltaDeg: null,
+      targetAlignmentProgress: 0,
+      nearCenter: false,
+      stableEnough: false,
+      movedEnough: false,
+      canCapture: false,
+      issue: 'complete',
+      allCaptured: true,
+    };
+  }
+
+  const capturedSet = new Set(capturedSlots);
+  const currentStageSlotIndex = getStageSlotIndexFromHeading(heading, currentStage.shots);
+  const currentSlot = currentStage.slotStart + currentStageSlotIndex;
+  const currentSlotCaptured = capturedSet.has(currentSlot);
+  const target = getNearestUncapturedStageTarget(heading, currentStage, capturedSlots);
+  const slotWidth = 360 / Math.max(1, currentStage.shots);
+  const nearCenter = target
+    ? Math.abs(target.targetDeltaDeg) <= slotWidth * slotCenterWindowRatio
+    : false;
+  const movedEnoughSinceLastCapture =
+    lastCapturedHeading === null
+      ? true
+      : absoluteHeadingDistance(heading, lastCapturedHeading) >= slotWidth * minMovementSlotRatio;
+  const observedMovementRate =
+    lastCapturedHeading === null
+      ? true
+      : peakHeadingRateSinceCapture >= minMovementRateDegPerSec;
+  const movedEnough = movedEnoughSinceLastCapture && observedMovementRate;
+  const stableEnough = stableForMs >= stableRequiredMs;
+  const inCooldown = now - lastAcceptedAt < acceptIntervalMs;
+
+  let issue: AutoCaptureIssue | null = null;
+
+  if (!stageReady) {
+    issue = 'stage_locked';
+  } else if (!target) {
+    issue = 'complete';
+  } else if (!nearCenter) {
+    issue = 'align_to_marker';
+  } else if (!movedEnough) {
+    issue = 'move_to_next_angle';
+  } else if (inCooldown) {
+    issue = 'cooldown';
+  } else if (!stableEnough) {
+    issue = 'hold_steady';
+  } else if (isCapturing) {
+    issue = 'capturing';
+  } else if (!hasCamera) {
+    issue = 'camera_unavailable';
+  }
+
+  return {
+    currentStage,
+    currentSlot,
+    currentStageSlotIndex,
+    currentSlotCaptured,
+    targetSlot: target?.slot ?? null,
+    targetStageSlotIndex: target?.stageSlotIndex ?? null,
+    targetHeading: target?.targetHeading ?? null,
+    targetDeltaDeg: target?.targetDeltaDeg ?? null,
+    targetAlignmentProgress: getTargetAlignmentProgress(target?.targetDeltaDeg ?? null, currentStage.shots),
+    nearCenter,
+    stableEnough,
+    movedEnough,
+    canCapture: issue === null,
+    issue,
+    allCaptured: false,
+  };
 }
 
 export function validateSelectionFraming(

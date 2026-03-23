@@ -2,34 +2,23 @@ import { RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import RNFS from 'react-native-fs';
 import { Camera } from 'react-native-vision-camera';
 import {
+  AutoCaptureIssue,
+  CaptureGuidanceState,
   CaptureStageProgress,
+  evaluateCaptureGuidanceState,
   getActiveCaptureStage,
   getCapturePattern,
+  normalizeHeading,
 } from '../lib/captureGuidance';
 import {
   ensureScanSessionDirectories,
   getScanImagesDirectoryPath,
   upsertScanSession,
 } from '../storage/scansStore';
-import { ScanImageSlot, ScanSession } from '../types/scanSession';
+import { ScanCaptureMode, ScanImageSlot, ScanSession } from '../types/scanSession';
 import { HeadingState } from './useHeading';
 
-const ACCEPT_INTERVAL_MS = 800;
-const STABLE_REQUIRED_MS = 600;
-const SLOT_CENTER_WINDOW_RATIO = 0.28;
-const MIN_MOVEMENT_SLOT_RATIO = 0.6;
-const MIN_MOVEMENT_RATE_DEG_PER_SEC = 3;
-
-export type AutoCaptureIssue =
-  | 'complete'
-  | 'stage_locked'
-  | 'slot_captured'
-  | 'align_to_marker'
-  | 'move_to_next_angle'
-  | 'hold_steady'
-  | 'cooldown'
-  | 'capturing'
-  | 'camera_unavailable';
+const TURNTABLE_CAPTURE_INTERVAL_MS = 500;
 
 type CaptureAttemptResult =
   | {
@@ -45,21 +34,12 @@ type Params = {
   enabled: boolean;
   session?: ScanSession;
   stageReady: boolean;
+  captureMode: ScanCaptureMode;
   heading: HeadingState;
   onSessionUpdated: (session: ScanSession) => void;
 };
 
-type CaptureStatus = {
-  currentSlot: number | null;
-  currentStageSlotIndex: number | null;
-  currentSlotCaptured: boolean;
-  currentStage: CaptureStageProgress | null;
-  canCapture: boolean;
-  issue: AutoCaptureIssue | null;
-  nearCenter: boolean;
-  stableEnough: boolean;
-  movedEnough: boolean;
-  allCaptured: boolean;
+type CaptureStatus = CaptureGuidanceState & {
   stageReady: boolean;
 };
 
@@ -68,6 +48,11 @@ type Result = {
   currentStageSlotIndex: number | null;
   currentSlotCaptured: boolean;
   currentStage: CaptureStageProgress | null;
+  targetSlot: number | null;
+  targetStageSlotIndex: number | null;
+  targetHeading: number | null;
+  targetDeltaDeg: number | null;
+  targetAlignmentProgress: number;
   holdSteady: boolean;
   isCapturing: boolean;
   canCaptureNow: boolean;
@@ -80,48 +65,41 @@ type Result = {
   captureCurrentMissingSlot: () => Promise<CaptureAttemptResult>;
 };
 
-function normalizeHeading(value: number) {
-  return ((value % 360) + 360) % 360;
-}
-
 function normalizeFsPath(path: string) {
   return path.startsWith('file://') ? path.replace('file://', '') : path;
 }
 
-function shortestDeltaDegrees(next: number, prev: number) {
-  return ((next - prev + 540) % 360) - 180;
-}
-
-function absoluteAngularDistance(next: number, prev: number) {
-  return Math.abs(shortestDeltaDegrees(next, prev));
-}
-
-export function getSlotIndexFromHeading(heading: number, slotsTotal: number) {
-  const normalized = normalizeHeading(heading);
-  return Math.floor((normalized % 360) / (360 / slotsTotal));
-}
-
-function isNearSlotCenter(heading: number, slot: number, slotsTotal: number) {
-  const slotWidth = 360 / slotsTotal;
-  const center = normalizeHeading((slot + 0.5) * slotWidth);
-  const delta = absoluteAngularDistance(heading, center);
-  return delta <= slotWidth * SLOT_CENTER_WINDOW_RATIO;
-}
-
 function createEmptyStatus(stageReady: boolean): CaptureStatus {
   return {
+    currentStage: null,
     currentSlot: null,
     currentStageSlotIndex: null,
     currentSlotCaptured: false,
-    currentStage: null,
-    canCapture: false,
-    issue: null,
+    targetSlot: null,
+    targetStageSlotIndex: null,
+    targetHeading: null,
+    targetDeltaDeg: null,
+    targetAlignmentProgress: 0,
     nearCenter: false,
     stableEnough: false,
     movedEnough: false,
+    canCapture: false,
+    issue: null,
     allCaptured: false,
     stageReady,
   };
+}
+
+function getFirstMissingSlot(capturedSlots: number[], slotsTotal: number) {
+  const capturedSet = new Set(capturedSlots);
+
+  for (let slot = 0; slot < slotsTotal; slot += 1) {
+    if (!capturedSet.has(slot)) {
+      return slot;
+    }
+  }
+
+  return null;
 }
 
 export function useAutoCapture({
@@ -129,6 +107,7 @@ export function useAutoCapture({
   enabled,
   session,
   stageReady,
+  captureMode,
   heading,
   onSessionUpdated,
 }: Params): Result {
@@ -142,6 +121,7 @@ export function useAutoCapture({
   const headingRef = useRef(heading);
   const onSessionUpdatedRef = useRef(onSessionUpdated);
   const stageReadyRef = useRef(stageReady);
+  const captureModeRef = useRef(captureMode);
   const lastCapturedHeadingRef = useRef<number | null>(null);
   const peakHeadingRateSinceCaptureRef = useRef(0);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
@@ -155,66 +135,73 @@ export function useAutoCapture({
 
       const pattern = getCapturePattern(activeSession.slotsTotal);
       const capturedSlots = activeSession.images.map(image => image.slot);
-      const currentStage = getActiveCaptureStage(pattern, capturedSlots);
 
-      if (!currentStage) {
+      if (captureModeRef.current === 'turntable') {
+        const currentStage = getActiveCaptureStage(pattern, capturedSlots);
+        const targetSlot = getFirstMissingSlot(capturedSlots, activeSession.slotsTotal);
+        const now = Date.now();
+        const inCooldown = now - lastAcceptedRef.current < TURNTABLE_CAPTURE_INTERVAL_MS;
+
+        if (targetSlot === null) {
+          return {
+            ...createEmptyStatus(stageReadyRef.current),
+            allCaptured: true,
+            issue: 'complete',
+            stageReady: stageReadyRef.current,
+          };
+        }
+
+        const targetStageSlotIndex =
+          currentStage && targetSlot >= currentStage.slotStart && targetSlot <= currentStage.slotEnd
+            ? targetSlot - currentStage.slotStart
+            : null;
+
+        let issue: AutoCaptureIssue | null = null;
+
+        if (!stageReadyRef.current) {
+          issue = 'stage_locked';
+        } else if (inCooldown) {
+          issue = 'cooldown';
+        } else if (capturingRef.current) {
+          issue = 'capturing';
+        } else if (!cameraRef.current) {
+          issue = 'camera_unavailable';
+        }
+
         return {
-          ...createEmptyStatus(stageReadyRef.current),
-          allCaptured: true,
-          issue: 'complete',
+          currentStage,
+          currentSlot: targetSlot,
+          currentStageSlotIndex: targetStageSlotIndex,
+          currentSlotCaptured: false,
+          targetSlot,
+          targetStageSlotIndex,
+          targetHeading: null,
+          targetDeltaDeg: null,
+          targetAlignmentProgress: 1,
+          nearCenter: true,
+          stableEnough: true,
+          movedEnough: true,
+          canCapture: issue === null,
+          issue,
+          allCaptured: false,
+          stageReady: stageReadyRef.current,
         };
       }
 
-      const currentStageSlotIndex = getSlotIndexFromHeading(headingState.heading, currentStage.shots);
-      const currentSlot = currentStage.slotStart + currentStageSlotIndex;
-      const currentSlotCaptured = activeSession.images.some(image => image.slot === currentSlot);
-      const slotWidth = 360 / currentStage.shots;
-      const nearCenter = isNearSlotCenter(headingState.heading, currentStageSlotIndex, currentStage.shots);
-      const movedEnoughSinceLastHeading =
-        lastCapturedHeadingRef.current === null
-          ? true
-          : absoluteAngularDistance(headingState.heading, lastCapturedHeadingRef.current) >=
-            slotWidth * MIN_MOVEMENT_SLOT_RATIO;
-      const observedMovementRate =
-        lastCapturedHeadingRef.current === null
-          ? true
-          : peakHeadingRateSinceCaptureRef.current >= MIN_MOVEMENT_RATE_DEG_PER_SEC;
-      const movedEnough = movedEnoughSinceLastHeading && observedMovementRate;
-      const stableEnough = headingState.stableForMs >= STABLE_REQUIRED_MS;
-      const now = Date.now();
-      const inCooldown = now - lastAcceptedRef.current < ACCEPT_INTERVAL_MS;
-
-      let issue: AutoCaptureIssue | null = null;
-
-      if (!stageReadyRef.current) {
-        issue = 'stage_locked';
-      } else if (currentSlotCaptured) {
-        issue = 'slot_captured';
-      } else if (!nearCenter) {
-        issue = 'align_to_marker';
-      } else if (!movedEnough) {
-        issue = 'move_to_next_angle';
-      } else if (inCooldown) {
-        issue = 'cooldown';
-      } else if (!stableEnough) {
-        issue = 'hold_steady';
-      } else if (capturingRef.current) {
-        issue = 'capturing';
-      } else if (!cameraRef.current) {
-        issue = 'camera_unavailable';
-      }
-
       return {
-        currentSlot,
-        currentStageSlotIndex,
-        currentSlotCaptured,
-        currentStage,
-        canCapture: issue === null,
-        issue,
-        nearCenter,
-        stableEnough,
-        movedEnough,
-        allCaptured: false,
+        ...evaluateCaptureGuidanceState({
+          pattern,
+          capturedSlots,
+          heading: headingState.heading,
+          stableForMs: headingState.stableForMs,
+          stageReady: stageReadyRef.current,
+          lastCapturedHeading: lastCapturedHeadingRef.current,
+          peakHeadingRateSinceCapture: peakHeadingRateSinceCaptureRef.current,
+          now: Date.now(),
+          lastAcceptedAt: lastAcceptedRef.current,
+          isCapturing: capturingRef.current,
+          hasCamera: Boolean(cameraRef.current),
+        }),
         stageReady: stageReadyRef.current,
       };
     },
@@ -277,6 +264,11 @@ export function useAutoCapture({
     stageReadyRef.current = stageReady;
     setStatus(buildCaptureStatus(sessionRef.current, headingRef.current));
   }, [buildCaptureStatus, stageReady]);
+
+  useEffect(() => {
+    captureModeRef.current = captureMode;
+    setStatus(buildCaptureStatus(sessionRef.current, headingRef.current));
+  }, [buildCaptureStatus, captureMode]);
 
   const captureSlot = useCallback(
     async (slot: number) => {
@@ -346,16 +338,37 @@ export function useAutoCapture({
     const nextStatus = buildCaptureStatus(sessionRef.current, headingRef.current);
     setStatus(nextStatus);
 
-    if (!nextStatus.canCapture || nextStatus.currentSlot === null) {
+    if (capturingRef.current) {
       return {
         ok: false,
-        issue: nextStatus.issue ?? 'camera_unavailable',
+        issue: 'capturing',
       };
     }
 
-    await captureSlot(nextStatus.currentSlot);
+    if (nextStatus.allCaptured || nextStatus.targetSlot === null) {
+      return {
+        ok: false,
+        issue: nextStatus.issue ?? 'complete',
+      };
+    }
+
+    if (!stageReadyRef.current) {
+      return {
+        ok: false,
+        issue: 'stage_locked',
+      };
+    }
+
+    if (!cameraRef.current) {
+      return {
+        ok: false,
+        issue: 'camera_unavailable',
+      };
+    }
+
+    await captureSlot(nextStatus.targetSlot);
     return { ok: true };
-  }, [buildCaptureStatus, captureSlot]);
+  }, [buildCaptureStatus, cameraRef, captureSlot]);
 
   useEffect(() => {
     if (!enabled) {
@@ -374,8 +387,8 @@ export function useAutoCapture({
       setStatus(nextStatus);
       setHoldSteady(nextStatus.issue === 'hold_steady' || nextStatus.issue === 'cooldown');
 
-      if (nextStatus.canCapture && nextStatus.currentSlot !== null) {
-        captureSlot(nextStatus.currentSlot).catch(() => undefined);
+      if (nextStatus.canCapture && nextStatus.targetSlot !== null) {
+        captureSlot(nextStatus.targetSlot).catch(() => undefined);
       }
     }, 120);
 
@@ -387,6 +400,11 @@ export function useAutoCapture({
     currentStageSlotIndex: status.currentStageSlotIndex,
     currentSlotCaptured: status.currentSlotCaptured,
     currentStage: status.currentStage,
+    targetSlot: status.targetSlot,
+    targetStageSlotIndex: status.targetStageSlotIndex,
+    targetHeading: status.targetHeading,
+    targetDeltaDeg: status.targetDeltaDeg,
+    targetAlignmentProgress: status.targetAlignmentProgress,
     holdSteady,
     isCapturing,
     canCaptureNow: status.canCapture,

@@ -8,11 +8,12 @@ import {
   View,
 } from 'react-native';
 import { theme } from '../lib/theme';
-import { ObjectSelection, ObjectSelectionRect } from '../types/scanSession';
+import { ObjectSelection, ObjectSelectionRect, ScanTargetType } from '../types/scanSession';
 import { AppButton } from './AppButton';
 
 type Props = {
   onConfirm: (selection: ObjectSelection) => void;
+  targetType?: ScanTargetType;
   disabled?: boolean;
 };
 
@@ -25,22 +26,49 @@ const DEFAULT_SELECTION_SIZE = 0.26;
 const MIN_BOX_SIZE = 0.14;
 const MAX_BOX_SIZE = 0.9;
 const SIZE_STEP = 0.04;
+const DISH_BOX_ASPECT_RATIO = 1.45;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function buildCenteredBox(centerX: number, centerY: number, size: number): ObjectSelectionRect {
+function getBoxDimensions(size: number, targetType: ScanTargetType) {
   const nextSize = clamp(size, MIN_BOX_SIZE, MAX_BOX_SIZE);
+
+  if (targetType === 'dish') {
+    return {
+      width: nextSize,
+      height: clamp(nextSize / DISH_BOX_ASPECT_RATIO, MIN_BOX_SIZE / DISH_BOX_ASPECT_RATIO, MAX_BOX_SIZE),
+    };
+  }
+
   return {
-    x: clamp(centerX - nextSize / 2, 0, 1 - nextSize),
-    y: clamp(centerY - nextSize / 2, 0, 1 - nextSize),
     width: nextSize,
     height: nextSize,
   };
 }
 
-export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
+function buildCenteredBox(
+  centerX: number,
+  centerY: number,
+  size: number,
+  targetType: ScanTargetType,
+): ObjectSelectionRect {
+  const { width, height } = getBoxDimensions(size, targetType);
+
+  return {
+    x: clamp(centerX - width / 2, 0, 1 - width),
+    y: clamp(centerY - height / 2, 0, 1 - height),
+    width,
+    height,
+  };
+}
+
+export function ObjectSelectionOverlay({
+  onConfirm,
+  targetType = 'dish',
+  disabled = false,
+}: Props) {
   const [layout, setLayout] = useState<LayoutSize>({ width: 0, height: 0 });
   const [bbox, setBbox] = useState<ObjectSelectionRect | null>(null);
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
@@ -70,7 +98,12 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
 
     const centerX = bbox.x + bbox.width / 2;
     const centerY = bbox.y + bbox.height / 2;
-    const nextBox = buildCenteredBox(centerX, centerY, bbox.width + delta);
+    const nextBox = buildCenteredBox(
+      centerX,
+      centerY,
+      Math.max(bbox.width, bbox.height) + delta,
+      targetType,
+    );
     setSelection(nextBox);
   };
 
@@ -83,7 +116,7 @@ export function ObjectSelectionOverlay({ onConfirm, disabled = false }: Props) {
     const centerY = clamp(yPx / layout.height, 0, 1);
     const nextSize = bbox ? Math.max(bbox.width, bbox.height) : DEFAULT_SELECTION_SIZE;
 
-    setSelection(buildCenteredBox(centerX, centerY, nextSize));
+    setSelection(buildCenteredBox(centerX, centerY, nextSize, targetType));
   };
 
   const onLayout = (event: LayoutChangeEvent) => {

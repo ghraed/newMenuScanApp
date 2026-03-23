@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { apiClient, parseApiResponse, toApiError } from './client';
 import { getApiBaseUrl } from './config';
-import { ObjectSelection } from '../types/scanSession';
+import { ObjectSelection, ScanTargetType } from '../types/scanSession';
 
 const createScanResponseSchema = z.object({
   scanId: z.string().min(1),
@@ -61,7 +61,7 @@ const jobResponseSchema = z.object({
 
 export type ApiCreateScanRequest = {
   deviceId: string;
-  targetType: 'dish';
+  targetType: ScanTargetType;
   scaleMeters: number;
   slotsTotal: number;
 };

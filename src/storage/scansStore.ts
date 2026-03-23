@@ -2,16 +2,26 @@ import RNFS from 'react-native-fs';
 import { createMMKV } from 'react-native-mmkv';
 import { getDefaultCapturePattern } from '../lib/captureGuidance';
 import { createUuid } from '../utils/uuid';
-import { ScanSession } from '../types/scanSession';
+import { ScanCaptureMode, ScanSession, ScanTargetType } from '../types/scanSession';
 
 const storage = createMMKV({ id: 'scans-storage' });
 
 const SCANS_STORAGE_KEY = 'scans:sessions:v1';
 const DEFAULT_SCALE_METERS = 0.24;
 const DEFAULT_SLOTS_TOTAL = getDefaultCapturePattern().totalShots;
+const DEFAULT_TARGET_TYPE: ScanTargetType = 'dish';
+const DEFAULT_CAPTURE_MODE: ScanCaptureMode = 'orbit';
 const SCANS_ROOT_PATH = `${RNFS.DocumentDirectoryPath}/scans`;
 let scansRootEnsured = false;
 const ensuredScanDirectoryIds = new Set<string>();
+
+function normalizeSession(session: ScanSession): ScanSession {
+  return {
+    ...session,
+    targetType: session.targetType ?? DEFAULT_TARGET_TYPE,
+    captureMode: session.captureMode ?? DEFAULT_CAPTURE_MODE,
+  };
+}
 
 function parseSessions(raw: string | undefined): ScanSession[] {
   if (!raw) {
@@ -20,7 +30,7 @@ function parseSessions(raw: string | undefined): ScanSession[] {
 
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as ScanSession[]) : [];
+    return Array.isArray(parsed) ? (parsed as ScanSession[]).map(normalizeSession) : [];
   } catch {
     return [];
   }
@@ -101,11 +111,14 @@ export async function ensureScanSessionDirectories(scanId: string) {
 export async function createScanSession(
   scaleMeters: number = DEFAULT_SCALE_METERS,
   slotsTotal: number = DEFAULT_SLOTS_TOTAL,
+  targetType: ScanTargetType = DEFAULT_TARGET_TYPE,
+  captureMode: ScanCaptureMode = DEFAULT_CAPTURE_MODE,
 ): Promise<ScanSession> {
   const session: ScanSession = {
     id: createUuid(),
     createdAt: Date.now(),
-    targetType: 'dish',
+    targetType,
+    captureMode,
     scaleMeters,
     slotsTotal,
     images: [],

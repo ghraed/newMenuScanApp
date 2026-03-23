@@ -193,7 +193,7 @@ export function PreviewScreen({ route, navigation }: Props) {
 
       const remote = await apiCreateScan({
         deviceId: session.id,
-        targetType: 'dish',
+        targetType: session.targetType,
         scaleMeters: session.scaleMeters,
         slotsTotal: session.slotsTotal,
       });
