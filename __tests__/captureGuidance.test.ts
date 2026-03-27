@@ -4,19 +4,27 @@ import {
   getCapturePattern,
   getGhostGuideBoxRect,
   getNearestUncapturedStageTarget,
+  getStableStageTarget,
   getTargetAlignmentProgress,
   validateSelectionFraming,
 } from '../src/lib/captureGuidance';
 
 describe('capture guidance', () => {
+  test('keeps capture pattern stage totals aligned with the advertised total', () => {
+    const patterns = [24, 36, 50].map(total => getCapturePattern(total));
+
+    expect(patterns.map(pattern => pattern.stages.reduce((sum, stage) => sum + stage.shots, 0))).toEqual([
+      24,
+      36,
+      50,
+    ]);
+  });
+
   test('advances through the 36-photo pattern stages in order', () => {
     const pattern = getCapturePattern(36);
 
     expect(getActiveCaptureStage(pattern, [])?.stageIndex).toBe(0);
-    expect(getActiveCaptureStage(pattern, Array.from({ length: 12 }, (_, index) => index))?.stageIndex).toBe(1);
-    expect(
-      getActiveCaptureStage(pattern, Array.from({ length: 24 }, (_, index) => index))?.stageIndex,
-    ).toBe(2);
+    expect(getActiveCaptureStage(pattern, Array.from({ length: 18 }, (_, index) => index))?.stageIndex).toBe(1);
     expect(getActiveCaptureStage(pattern, Array.from({ length: 36 }, (_, index) => index))).toBeNull();
   });
 
@@ -52,7 +60,7 @@ describe('capture guidance', () => {
 
   test('chooses the nearest uncaptured stage target with the correct signed delta', () => {
     const pattern = getCapturePattern(36);
-    const capturedSlots = [0, 1, 11];
+    const capturedSlots = [0, 1, 4];
     const stage = getActiveCaptureStage(pattern, capturedSlots);
 
     expect(stage).not.toBeNull();
@@ -60,11 +68,11 @@ describe('capture guidance', () => {
     const target = getNearestUncapturedStageTarget(82, stage!, capturedSlots);
 
     expect(target).toEqual({
-      slot: 2,
-      stageSlotIndex: 2,
-      targetHeading: 75,
-      targetDeltaDeg: -7,
-      distanceDeg: 7,
+      slot: 3,
+      stageSlotIndex: 3,
+      targetHeading: 70,
+      targetDeltaDeg: -12,
+      distanceDeg: 12,
     });
   });
 
@@ -72,10 +80,10 @@ describe('capture guidance', () => {
     const pattern = getCapturePattern(36);
     const baseParams = {
       pattern,
-      heading: 80,
+      heading: 70,
       stableForMs: 800,
       stageReady: true,
-      lastCapturedHeading: 15,
+      lastCapturedHeading: 50,
       peakHeadingRateSinceCapture: 10,
       now: 3000,
       lastAcceptedAt: 0,
@@ -85,17 +93,30 @@ describe('capture guidance', () => {
 
     const beforeCapture = evaluateCaptureGuidanceState({
       ...baseParams,
-      capturedSlots: [0],
+      capturedSlots: [0, 1, 2],
     });
     const afterCapture = evaluateCaptureGuidanceState({
       ...baseParams,
-      capturedSlots: [0, 2],
+      capturedSlots: [0, 1, 2, 3],
     });
 
-    expect(beforeCapture.targetSlot).toBe(2);
-    expect(beforeCapture.targetStageSlotIndex).toBe(2);
-    expect(afterCapture.targetSlot).toBe(3);
-    expect(afterCapture.targetStageSlotIndex).toBe(3);
+    expect(beforeCapture.targetSlot).toBe(3);
+    expect(beforeCapture.targetStageSlotIndex).toBe(3);
+    expect(afterCapture.targetSlot).toBe(4);
+    expect(afterCapture.targetStageSlotIndex).toBe(4);
+  });
+
+  test('holds the current guide target until the next slot is clearly better', () => {
+    const pattern = getCapturePattern(36);
+    const stage = getActiveCaptureStage(pattern, [0, 1, 2]);
+
+    expect(stage).not.toBeNull();
+
+    const stickyTarget = getStableStageTarget(82, stage!, [0, 1, 2], 3);
+    const switchedTarget = getStableStageTarget(86, stage!, [0, 1, 2], 3);
+
+    expect(stickyTarget?.slot).toBe(3);
+    expect(switchedTarget?.slot).toBe(4);
   });
 
   test('ghost box moves toward the target, collapses at alignment, and stays on screen', () => {
@@ -133,9 +154,9 @@ describe('capture guidance', () => {
     const pattern = getCapturePattern(36);
     const baseParams = {
       pattern,
-      capturedSlots: [0],
+      capturedSlots: [0, 1, 2],
       stageReady: true,
-      lastCapturedHeading: 15,
+      lastCapturedHeading: 50,
       peakHeadingRateSinceCapture: 10,
       now: 3000,
       lastAcceptedAt: 0,
@@ -145,21 +166,21 @@ describe('capture guidance', () => {
 
     const ready = evaluateCaptureGuidanceState({
       ...baseParams,
-      heading: 75,
+      heading: 70,
       stableForMs: 800,
     });
     const misaligned = evaluateCaptureGuidanceState({
       ...baseParams,
-      heading: 60,
+      heading: 55,
       stableForMs: 800,
     });
     const unstable = evaluateCaptureGuidanceState({
       ...baseParams,
-      heading: 75,
+      heading: 70,
       stableForMs: 100,
     });
 
-    expect(ready.targetSlot).toBe(2);
+    expect(ready.targetSlot).toBe(3);
     expect(ready.canCapture).toBe(true);
     expect(ready.issue).toBeNull();
     expect(misaligned.canCapture).toBe(false);

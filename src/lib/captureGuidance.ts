@@ -1,6 +1,6 @@
 import { ObjectSelection, ObjectSelectionRect } from '../types/scanSession';
 
-export type CaptureStageId = 'middle' | 'low' | 'high';
+export type CaptureStageId = 'side' | 'high';
 
 export type CaptureStage = {
   id: CaptureStageId;
@@ -80,6 +80,7 @@ type EvaluateCaptureGuidanceParams = {
   pattern: CapturePattern;
   capturedSlots: number[];
   heading: number;
+  preferredTargetSlot?: number | null;
   stableForMs: number;
   stageReady: boolean;
   lastCapturedHeading: number | null;
@@ -91,6 +92,7 @@ type EvaluateCaptureGuidanceParams = {
   acceptIntervalMs?: number;
   stableRequiredMs?: number;
   slotCenterWindowRatio?: number;
+  targetSwitchHysteresisRatio?: number;
   minMovementSlotRatio?: number;
   minMovementRateDegPerSec?: number;
 };
@@ -102,6 +104,7 @@ const MIN_SELECTION_MARGIN = 0.05;
 const DEFAULT_ACCEPT_INTERVAL_MS = 450;
 const DEFAULT_STABLE_REQUIRED_MS = 280;
 const DEFAULT_SLOT_CENTER_WINDOW_RATIO = 0.42;
+const DEFAULT_TARGET_SWITCH_HYSTERESIS_RATIO = 0.28;
 const DEFAULT_MIN_MOVEMENT_SLOT_RATIO = 0.35;
 const DEFAULT_MIN_MOVEMENT_RATE_DEG_PER_SEC = 1.2;
 const DEFAULT_GHOST_BOX_MAX_SHIFT_RATIO = 0.9;
@@ -111,32 +114,20 @@ export const CAPTURE_PATTERNS: CapturePattern[] = [
     id: 'pattern_24',
     title: '24 Photos',
     shortTitle: '24',
-    description: '8 middle, 8 lower, 8 upper. Fastest full scan.',
+    description: '12 side, 12 upper. Fastest full scan.',
     totalShots: 24,
     stages: [
       {
-        id: 'middle',
-        title: 'Middle Ring',
-        shortTitle: 'Middle',
-        description: 'Keep the camera level with the object center.',
-        promptTitle: 'Start the Middle Ring',
+        id: 'side',
+        title: 'Side Ring',
+        shortTitle: 'Side',
+        description: 'Keep the camera level with the object center to capture the sides.',
+        promptTitle: 'Start the Side Ring',
         promptMessage:
-          'Keep the camera level with the object center. Walk around once while the object fills the guide.',
-        confirmLabel: 'Start Middle Ring',
+          'Keep the camera level with the object center. Walk around once while keeping the sides framed inside the guide.',
+        confirmLabel: 'Start Side Ring',
         moveLabel: 'Keep level',
-        shots: 8,
-      },
-      {
-        id: 'low',
-        title: 'Lower Ring',
-        shortTitle: 'Lower',
-        description: 'Move downward and look slightly upward.',
-        promptTitle: 'Move Downward',
-        promptMessage:
-          'Lower the camera until you can see more of the bottom edges. Keep the object the same size inside the guide.',
-        confirmLabel: 'I Moved Downward',
-        moveLabel: 'Move downward',
-        shots: 8,
+        shots: 12,
       },
       {
         id: 'high',
@@ -148,7 +139,7 @@ export const CAPTURE_PATTERNS: CapturePattern[] = [
           'Raise the camera until you can see more of the top surface. Keep the object centered and inside the guide.',
         confirmLabel: 'I Moved Upward',
         moveLabel: 'Move upward',
-        shots: 8,
+        shots: 12,
       },
     ],
   },
@@ -156,33 +147,21 @@ export const CAPTURE_PATTERNS: CapturePattern[] = [
     id: 'pattern_36',
     title: '36 Photos',
     shortTitle: '36',
-    description: '12 middle, 12 lower, 12 upper. Best default quality.',
+    description: '18 side, 18 upper. Best default quality.',
     totalShots: 36,
     recommended: true,
     stages: [
       {
-        id: 'middle',
-        title: 'Middle Ring',
-        shortTitle: 'Middle',
-        description: 'Keep the camera level with the object center.',
-        promptTitle: 'Start the Middle Ring',
+        id: 'side',
+        title: 'Side Ring',
+        shortTitle: 'Side',
+        description: 'Keep the camera level with the object center to capture the sides.',
+        promptTitle: 'Start the Side Ring',
         promptMessage:
-          'Keep the camera level with the object center. Rotate around it with smooth, even spacing between shots.',
-        confirmLabel: 'Start Middle Ring',
+          'Keep the camera level with the object center. Rotate around it with smooth, even spacing so the side profile is fully covered.',
+        confirmLabel: 'Start Side Ring',
         moveLabel: 'Keep level',
-        shots: 12,
-      },
-      {
-        id: 'low',
-        title: 'Lower Ring',
-        shortTitle: 'Lower',
-        description: 'Move downward and look slightly upward.',
-        promptTitle: 'Move Downward',
-        promptMessage:
-          'Lower the camera and keep the object framed in the guide. You should see more of the lower edges before capturing.',
-        confirmLabel: 'I Moved Downward',
-        moveLabel: 'Move downward',
-        shots: 12,
+        shots: 18,
       },
       {
         id: 'high',
@@ -194,7 +173,7 @@ export const CAPTURE_PATTERNS: CapturePattern[] = [
           'Raise the camera and keep the object size consistent. You should see more of the top surface before capturing.',
         confirmLabel: 'I Moved Upward',
         moveLabel: 'Move upward',
-        shots: 12,
+        shots: 18,
       },
     ],
   },
@@ -202,32 +181,20 @@ export const CAPTURE_PATTERNS: CapturePattern[] = [
     id: 'pattern_50',
     title: '50 Photos',
     shortTitle: '50',
-    description: '18 middle, 16 lower, 16 upper. Highest density.',
+    description: '25 side, 25 upper. Highest density.',
     totalShots: 50,
     stages: [
       {
-        id: 'middle',
-        title: 'Middle Ring',
-        shortTitle: 'Middle',
-        description: 'Keep the camera level with the object center.',
-        promptTitle: 'Start the Middle Ring',
+        id: 'side',
+        title: 'Side Ring',
+        shortTitle: 'Side',
+        description: 'Keep the camera level with the object center to capture the sides.',
+        promptTitle: 'Start the Side Ring',
         promptMessage:
-          'Begin at object-center height. Use very small, even angle changes and keep the object filling the guide.',
-        confirmLabel: 'Start Middle Ring',
+          'Begin at object-center height. Use very small, even angle changes and keep the side profile filling the guide.',
+        confirmLabel: 'Start Side Ring',
         moveLabel: 'Keep level',
-        shots: 18,
-      },
-      {
-        id: 'low',
-        title: 'Lower Ring',
-        shortTitle: 'Lower',
-        description: 'Move downward and look slightly upward.',
-        promptTitle: 'Move Downward',
-        promptMessage:
-          'Lower the camera and keep the object large in frame. Capture the lower edges from many evenly spaced angles.',
-        confirmLabel: 'I Moved Downward',
-        moveLabel: 'Move downward',
-        shots: 16,
+        shots: 25,
       },
       {
         id: 'high',
@@ -239,7 +206,7 @@ export const CAPTURE_PATTERNS: CapturePattern[] = [
           'Raise the camera and look slightly down. Keep the guide tight around the object while you finish the top ring.',
         confirmLabel: 'I Moved Upward',
         moveLabel: 'Move upward',
-        shots: 16,
+        shots: 25,
       },
     ],
   },
@@ -363,6 +330,60 @@ export function getNearestUncapturedStageTarget(
   return bestTarget;
 }
 
+export function getStageTargetBySlot(
+  heading: number,
+  stage: CaptureStageProgress,
+  slot: number,
+): CaptureTarget | null {
+  if (slot < stage.slotStart || slot > stage.slotEnd) {
+    return null;
+  }
+
+  const stageSlotIndex = slot - stage.slotStart;
+  const targetHeading = getStageSlotCenterHeading(stageSlotIndex, stage.shots);
+  const targetDeltaDeg = shortestHeadingDelta(targetHeading, heading);
+
+  return {
+    slot,
+    stageSlotIndex,
+    targetHeading,
+    targetDeltaDeg,
+    distanceDeg: Math.abs(targetDeltaDeg),
+  };
+}
+
+export function getStableStageTarget(
+  heading: number,
+  stage: CaptureStageProgress,
+  capturedSlots: number[],
+  preferredTargetSlot: number | null,
+  targetSwitchHysteresisRatio = DEFAULT_TARGET_SWITCH_HYSTERESIS_RATIO,
+): CaptureTarget | null {
+  const nearestTarget = getNearestUncapturedStageTarget(heading, stage, capturedSlots);
+  if (!nearestTarget || preferredTargetSlot === null) {
+    return nearestTarget;
+  }
+
+  const capturedSet = new Set(capturedSlots);
+  if (capturedSet.has(preferredTargetSlot)) {
+    return nearestTarget;
+  }
+
+  const preferredTarget = getStageTargetBySlot(heading, stage, preferredTargetSlot);
+  if (!preferredTarget) {
+    return nearestTarget;
+  }
+
+  const slotWidth = 360 / Math.max(1, stage.shots);
+  const switchThreshold = slotWidth * targetSwitchHysteresisRatio;
+
+  if (preferredTarget.distanceDeg <= nearestTarget.distanceDeg + switchThreshold) {
+    return preferredTarget;
+  }
+
+  return nearestTarget;
+}
+
 export function getTargetAlignmentProgress(targetDeltaDeg: number | null, shots: number) {
   if (targetDeltaDeg === null) {
     return 0;
@@ -394,6 +415,7 @@ export function evaluateCaptureGuidanceState({
   pattern,
   capturedSlots,
   heading,
+  preferredTargetSlot = null,
   stableForMs,
   stageReady,
   lastCapturedHeading,
@@ -405,6 +427,7 @@ export function evaluateCaptureGuidanceState({
   acceptIntervalMs = DEFAULT_ACCEPT_INTERVAL_MS,
   stableRequiredMs = DEFAULT_STABLE_REQUIRED_MS,
   slotCenterWindowRatio = DEFAULT_SLOT_CENTER_WINDOW_RATIO,
+  targetSwitchHysteresisRatio = DEFAULT_TARGET_SWITCH_HYSTERESIS_RATIO,
   minMovementSlotRatio = DEFAULT_MIN_MOVEMENT_SLOT_RATIO,
   minMovementRateDegPerSec = DEFAULT_MIN_MOVEMENT_RATE_DEG_PER_SEC,
 }: EvaluateCaptureGuidanceParams): CaptureGuidanceState {
@@ -434,7 +457,13 @@ export function evaluateCaptureGuidanceState({
   const currentStageSlotIndex = getStageSlotIndexFromHeading(heading, currentStage.shots);
   const currentSlot = currentStage.slotStart + currentStageSlotIndex;
   const currentSlotCaptured = capturedSet.has(currentSlot);
-  const target = getNearestUncapturedStageTarget(heading, currentStage, capturedSlots);
+  const target = getStableStageTarget(
+    heading,
+    currentStage,
+    capturedSlots,
+    preferredTargetSlot,
+    targetSwitchHysteresisRatio,
+  );
   const slotWidth = 360 / Math.max(1, currentStage.shots);
   const nearCenter = target
     ? Math.abs(target.targetDeltaDeg) <= slotWidth * slotCenterWindowRatio

@@ -150,6 +150,14 @@ function isActiveJobStatus(status: string | undefined) {
   return ['queued', 'processing', 'partial', 'uploading'].includes(status ?? '');
 }
 
+function canRetryModelWithoutUpload(scan: ScanSession) {
+  return Boolean(
+    scan.remoteScanId &&
+      scan.jobId &&
+      (scan.status === 'error' || scan.status === 'canceled'),
+  );
+}
+
 export function PreviewScreen({ route, navigation }: Props) {
   const { scanId } = route.params;
   const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
@@ -632,28 +640,37 @@ export function PreviewScreen({ route, navigation }: Props) {
         return;
       }
 
-      const orderedImages = [...current.images].sort((a, b) => a.slot - b.slot);
-      const totalUploads = orderedImages.length;
+      if (canRetryModelWithoutUpload(current)) {
+        current = await commitSession({
+          ...current,
+          status: 'processing',
+          progress: 0,
+          message: 'Retrying 3D model generation with existing uploaded images',
+        });
+      } else {
+        const orderedImages = [...current.images].sort((a, b) => a.slot - b.slot);
+        const totalUploads = orderedImages.length;
 
-      current = await commitSession({
-        ...current,
-        status: 'uploading',
-        progress: 0,
-        uploadCompleted: 0,
-        uploadTotal: totalUploads,
-        message: undefined,
-      });
-
-      for (let index = 0; index < orderedImages.length; index += 1) {
-        await uploadWithRetry(remoteScanId, orderedImages[index], current.objectSelection);
-        const completed = index + 1;
         current = await commitSession({
           ...current,
           status: 'uploading',
-          progress: totalUploads === 0 ? 0 : Math.round((completed / totalUploads) * 100),
-          uploadCompleted: completed,
+          progress: 0,
+          uploadCompleted: 0,
           uploadTotal: totalUploads,
+          message: undefined,
         });
+
+        for (let index = 0; index < orderedImages.length; index += 1) {
+          await uploadWithRetry(remoteScanId, orderedImages[index], current.objectSelection);
+          const completed = index + 1;
+          current = await commitSession({
+            ...current,
+            status: 'uploading',
+            progress: totalUploads === 0 ? 0 : Math.round((completed / totalUploads) * 100),
+            uploadCompleted: completed,
+            uploadTotal: totalUploads,
+          });
+        }
       }
 
       const submitResult = await apiSubmitScan(remoteScanId);

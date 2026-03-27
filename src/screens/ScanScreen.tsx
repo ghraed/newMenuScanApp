@@ -238,7 +238,7 @@ export function ScanScreen({ route, navigation }: Props) {
     return {
       horizontal:
         targetDelta > 2 ? 'right' : targetDelta < -2 ? 'left' : null,
-      vertical: activeStage?.id === 'low' ? 'down' : activeStage?.id === 'high' ? 'up' : null,
+      vertical: activeStage?.id === 'high' ? 'up' : null,
     } as const;
   }, [activeStage?.id, autoCapture.targetDeltaDeg]);
 
@@ -323,11 +323,6 @@ export function ScanScreen({ route, navigation }: Props) {
                 {ghostArrowDirection.vertical === 'up' ? (
                   <View style={[styles.ghostArrowBadge, styles.ghostArrowTop]}>
                     <Text style={styles.ghostArrowText}>{'^^^'}</Text>
-                  </View>
-                ) : null}
-                {ghostArrowDirection.vertical === 'down' ? (
-                  <View style={[styles.ghostArrowBadge, styles.ghostArrowBottom]}>
-                    <Text style={styles.ghostArrowText}>{'VVV'}</Text>
                   </View>
                 ) : null}
               </View>
@@ -449,10 +444,6 @@ const styles = StyleSheet.create({
   },
   ghostArrowTop: {
     top: theme.spacing.xs,
-    alignSelf: 'center',
-  },
-  ghostArrowBottom: {
-    bottom: theme.spacing.xs,
     alignSelf: 'center',
   },
   ghostArrowText: {

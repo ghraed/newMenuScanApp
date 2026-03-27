@@ -126,6 +126,7 @@ export function useAutoCapture({
   const peakHeadingRateSinceCaptureRef = useRef(0);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const activeStageIndexRef = useRef<number | null>(null);
+  const preferredTargetSlotRef = useRef<number | null>(null);
 
   const buildCaptureStatus = useCallback(
     (activeSession: ScanSession | undefined, headingState: HeadingState): CaptureStatus => {
@@ -193,6 +194,7 @@ export function useAutoCapture({
           pattern,
           capturedSlots,
           heading: headingState.heading,
+          preferredTargetSlot: preferredTargetSlotRef.current,
           stableForMs: headingState.stableForMs,
           stageReady: stageReadyRef.current,
           lastCapturedHeading: lastCapturedHeadingRef.current,
@@ -218,6 +220,7 @@ export function useAutoCapture({
       peakHeadingRateSinceCaptureRef.current = 0;
       lastAcceptedRef.current = 0;
       activeStageIndexRef.current = null;
+      preferredTargetSlotRef.current = null;
     }
 
     if (!session) {
@@ -237,6 +240,7 @@ export function useAutoCapture({
       lastCapturedHeadingRef.current = null;
       peakHeadingRateSinceCaptureRef.current = 0;
       lastAcceptedRef.current = 0;
+      preferredTargetSlotRef.current = null;
     } else if (session.images.length > 0) {
       const latestCapture = session.images.reduce((latest, image) => {
         if (!latest || image.timestamp > latest.timestamp) {
@@ -248,12 +252,16 @@ export function useAutoCapture({
       lastCapturedHeadingRef.current = normalizeHeading(latestCapture.heading);
     }
 
-    setStatus(buildCaptureStatus(session, headingRef.current));
+    const nextStatus = buildCaptureStatus(session, headingRef.current);
+    preferredTargetSlotRef.current = nextStatus.targetSlot;
+    setStatus(nextStatus);
   }, [buildCaptureStatus, session]);
 
   useEffect(() => {
     headingRef.current = heading;
-    setStatus(buildCaptureStatus(sessionRef.current, heading));
+    const nextStatus = buildCaptureStatus(sessionRef.current, heading);
+    preferredTargetSlotRef.current = nextStatus.targetSlot;
+    setStatus(nextStatus);
   }, [buildCaptureStatus, heading]);
 
   useEffect(() => {
@@ -262,12 +270,16 @@ export function useAutoCapture({
 
   useEffect(() => {
     stageReadyRef.current = stageReady;
-    setStatus(buildCaptureStatus(sessionRef.current, headingRef.current));
+    const nextStatus = buildCaptureStatus(sessionRef.current, headingRef.current);
+    preferredTargetSlotRef.current = nextStatus.targetSlot;
+    setStatus(nextStatus);
   }, [buildCaptureStatus, stageReady]);
 
   useEffect(() => {
     captureModeRef.current = captureMode;
-    setStatus(buildCaptureStatus(sessionRef.current, headingRef.current));
+    const nextStatus = buildCaptureStatus(sessionRef.current, headingRef.current);
+    preferredTargetSlotRef.current = nextStatus.targetSlot;
+    setStatus(nextStatus);
   }, [buildCaptureStatus, captureMode]);
 
   const captureSlot = useCallback(
@@ -323,7 +335,9 @@ export function useAutoCapture({
         lastCapturedHeadingRef.current = image.heading;
         peakHeadingRateSinceCaptureRef.current = 0;
 
-        setStatus(buildCaptureStatus(nextSession, headingRef.current));
+        const nextStatus = buildCaptureStatus(nextSession, headingRef.current);
+        preferredTargetSlotRef.current = nextStatus.targetSlot;
+        setStatus(nextStatus);
       } catch {
         setHoldSteady(true);
       } finally {
@@ -336,6 +350,7 @@ export function useAutoCapture({
 
   const captureCurrentMissingSlot = useCallback(async (): Promise<CaptureAttemptResult> => {
     const nextStatus = buildCaptureStatus(sessionRef.current, headingRef.current);
+    preferredTargetSlotRef.current = nextStatus.targetSlot;
     setStatus(nextStatus);
 
     if (capturingRef.current) {
@@ -384,6 +399,7 @@ export function useAutoCapture({
       );
 
       const nextStatus = buildCaptureStatus(sessionRef.current, headingState);
+      preferredTargetSlotRef.current = nextStatus.targetSlot;
       setStatus(nextStatus);
       setHoldSteady(nextStatus.issue === 'hold_steady' || nextStatus.issue === 'cooldown');
 
