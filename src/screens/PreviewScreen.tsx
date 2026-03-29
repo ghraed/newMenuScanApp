@@ -1248,8 +1248,8 @@ export function PreviewScreen({ route, navigation }: Props) {
         <>
           <View style={styles.summaryCard}>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Scale (meters)</Text>
-              <Text style={styles.summaryValue}>{scan.scaleMeters.toFixed(2)}</Text>
+              <Text style={styles.summaryLabel}>Size (cm)</Text>
+              <Text style={styles.summaryValue}>{Math.round(scan.scaleMeters * 100)} cm</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Captured</Text>

@@ -23,25 +23,29 @@ const OBJECT_SIZE_PRESETS: Record<ScanTargetType, number[]> = {
 };
 const MIN_OBJECT_SIZE = 0.04;
 const MAX_OBJECT_SIZE = 2.0;
+const metersToCentimeters = (value: number) => Math.round(value * 100);
+const centimetersToMeters = (value: number) => value / 100;
 
 export function SetupScreen({ navigation }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [selectedTargetType, setSelectedTargetType] = useState<ScanTargetType>(DEFAULT_OBJECT_TYPE);
   const [selectedCaptureMode, setSelectedCaptureMode] = useState<ScanCaptureMode>(DEFAULT_CAPTURE_MODE);
-  const [dishSizeInput, setDishSizeInput] = useState(String(DEFAULT_OBJECT_SIZES[DEFAULT_OBJECT_TYPE]));
+  const [dishSizeInput, setDishSizeInput] = useState(
+    String(metersToCentimeters(DEFAULT_OBJECT_SIZES[DEFAULT_OBJECT_TYPE])),
+  );
   const [selectedPatternTotal, setSelectedPatternTotal] = useState(getDefaultCapturePattern().totalShots);
 
-  const parsedSize = useMemo(() => Number.parseFloat(dishSizeInput), [dishSizeInput]);
+  const parsedSizeCm = useMemo(() => Number.parseFloat(dishSizeInput), [dishSizeInput]);
   const isValid =
-    Number.isFinite(parsedSize) &&
-    parsedSize >= MIN_OBJECT_SIZE &&
-    parsedSize <= MAX_OBJECT_SIZE;
+    Number.isFinite(parsedSizeCm) &&
+    parsedSizeCm >= metersToCentimeters(MIN_OBJECT_SIZE) &&
+    parsedSizeCm <= metersToCentimeters(MAX_OBJECT_SIZE);
   const selectedPattern = useMemo(
     () => CAPTURE_PATTERNS.find(pattern => pattern.totalShots === selectedPatternTotal) ?? getDefaultCapturePattern(),
     [selectedPatternTotal],
   );
-  const sizeLabel = selectedTargetType === 'dish' ? 'Dish Size (meters)' : 'Juice Width (meters)';
+  const sizeLabel = selectedTargetType === 'dish' ? 'Dish Size (cm)' : 'Juice Width (cm)';
   const objectTypeDescription =
     selectedTargetType === 'dish'
       ? 'Use a wider framing guide that fits plates and bowls.'
@@ -52,19 +56,19 @@ export function SetupScreen({ navigation }: Props) {
       : 'Move the phone around the object and let the guided capture flow choose each angle.';
 
   useEffect(() => {
-    setDishSizeInput(String(DEFAULT_OBJECT_SIZES[selectedTargetType]));
+    setDishSizeInput(String(metersToCentimeters(DEFAULT_OBJECT_SIZES[selectedTargetType])));
   }, [selectedTargetType]);
 
   const helperText = isValid
-    ? `${selectedTargetType === 'dish' ? 'Dish size' : 'Juice width'}: ${parsedSize.toFixed(2)} meters`
-    : `Enter a value between ${MIN_OBJECT_SIZE} and ${MAX_OBJECT_SIZE} meters`;
+    ? `${selectedTargetType === 'dish' ? 'Dish size' : 'Juice width'}: ${parsedSizeCm.toFixed(0)} cm`
+    : `Enter a value between ${metersToCentimeters(MIN_OBJECT_SIZE)} and ${metersToCentimeters(MAX_OBJECT_SIZE)} cm`;
 
   const createSession = async () => {
     if (!isValid) {
       return;
     }
     const session = await createScanSession(
-      parsedSize,
+      centimetersToMeters(parsedSizeCm),
       selectedPattern.totalShots,
       selectedTargetType,
       selectedCaptureMode,
@@ -144,7 +148,7 @@ export function SetupScreen({ navigation }: Props) {
           value={dishSizeInput}
           onChangeText={setDishSizeInput}
           keyboardType="decimal-pad"
-          placeholder="0.24"
+          placeholder="24"
           placeholderTextColor={theme.colors.textMuted}
           selectionColor={theme.colors.primary}
           style={styles.input}
@@ -154,10 +158,10 @@ export function SetupScreen({ navigation }: Props) {
           {OBJECT_SIZE_PRESETS[selectedTargetType].map(size => (
             <AppButton
               key={size}
-              title={`${size}m`}
+              title={`${metersToCentimeters(size)} cm`}
               variant="secondary"
               style={styles.quickButton}
-              onPress={() => setDishSizeInput(String(size))}
+              onPress={() => setDishSizeInput(String(metersToCentimeters(size)))}
             />
           ))}
         </View>
