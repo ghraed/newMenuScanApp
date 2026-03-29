@@ -30,7 +30,7 @@ import {
   cropFileToSelectionInPlace,
   getSelectionUploadUri,
 } from '../lib/objectSelectionImage';
-import { theme } from '../lib/theme';
+import { AppTheme, useAppTheme } from '../lib/theme';
 import {
   deleteScanBackgroundOutputs,
   deleteScanSession,
@@ -159,6 +159,8 @@ function canRetryModelWithoutUpload(scan: ScanSession) {
 }
 
 export function PreviewScreen({ route, navigation }: Props) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const { scanId } = route.params;
   const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1490,141 +1492,189 @@ export function PreviewScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  summaryCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.md,
-    gap: theme.spacing.sm,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing.md,
-  },
-  summaryLabel: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  summaryValue: {
-    color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  section: {
-    gap: theme.spacing.md,
-  },
-  sectionTitle: {
-    color: theme.colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  progressCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.md,
-    gap: theme.spacing.sm,
-  },
-  progressTitle: {
-    color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  progressMeta: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  progressTrack: {
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: theme.colors.surfaceAlt,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: theme.colors.primary,
-  },
-  progressMessage: {
-    color: theme.colors.textMuted,
-    fontSize: 12,
-  },
-  errorCard: {
-    backgroundColor: '#2B1318',
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.danger,
-    padding: theme.spacing.md,
-    gap: theme.spacing.xs,
-  },
-  errorTitle: {
-    color: theme.colors.text,
-    fontWeight: '700',
-  },
-  errorText: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  thumbGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.spacing.md,
-  },
-  thumbCard: {
-    width: '47%',
-    minWidth: 140,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.sm,
-    gap: theme.spacing.sm,
-  },
-  thumbImage: {
-    height: 90,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#0E1428',
-  },
-  thumbMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing.sm,
-  },
-  thumbLabel: {
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
-  thumbBadge: {
-    color: theme.colors.primary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  emptyState: {
-    width: '100%',
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.lg,
-  },
-  emptyStateText: {
-    color: theme.colors.textMuted,
-  },
-  actions: {
-    gap: theme.spacing.md,
-    marginTop: theme.spacing.sm,
-  },
-  bgRemovedButton: {
-    backgroundColor: '#3A8D5D',
-    borderColor: '#3A8D5D',
-  },
-});
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    summaryCard: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.md,
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.md,
+    },
+    summaryLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    summaryValue: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: 0.2,
+    },
+    section: {
+      gap: theme.spacing.md,
+    },
+    sectionTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.title.fontFamily,
+      fontSize: 20,
+      lineHeight: 26,
+      fontWeight: theme.typography.title.fontWeight,
+      letterSpacing: theme.typography.title.letterSpacing,
+    },
+    progressCard: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.md,
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    progressTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    progressMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    progressTrack: {
+      height: 8,
+      borderRadius: theme.radius.pill,
+      backgroundColor: theme.colors.surfaceAlt,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: theme.colors.primary,
+    },
+    progressMessage: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    errorCard: {
+      backgroundColor: theme.colors.dangerSoft,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.danger,
+      padding: theme.spacing.md,
+      gap: theme.spacing.xs,
+    },
+    errorTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    errorText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    thumbGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: theme.spacing.md,
+    },
+    thumbCard: {
+      width: '47%',
+      minWidth: 140,
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.sm,
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    thumbImage: {
+      height: 90,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: theme.colors.surfaceAlt,
+    },
+    thumbMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.sm,
+    },
+    thumbLabel: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: 0.2,
+    },
+    thumbBadge: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.label.fontFamily,
+      fontSize: theme.typography.label.fontSize,
+      lineHeight: theme.typography.label.lineHeight,
+      fontWeight: theme.typography.label.fontWeight,
+      letterSpacing: theme.typography.label.letterSpacing,
+      textTransform: theme.typography.label.textTransform,
+    },
+    emptyState: {
+      width: '100%',
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.lg,
+      ...theme.shadows.card,
+    },
+    emptyStateText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.body.fontFamily,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
+      fontWeight: theme.typography.body.fontWeight,
+      letterSpacing: theme.typography.body.letterSpacing,
+    },
+    actions: {
+      gap: theme.spacing.md,
+      marginTop: theme.spacing.sm,
+    },
+    bgRemovedButton: {
+      backgroundColor: theme.colors.success,
+      borderColor: theme.colors.success,
+    },
+  });
+}

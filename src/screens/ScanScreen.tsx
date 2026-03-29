@@ -16,7 +16,7 @@ import {
   validateSelectionFraming,
 } from '../lib/captureGuidance';
 import { useHeading } from '../hooks/useHeading';
-import { theme } from '../lib/theme';
+import { AppTheme, useAppTheme } from '../lib/theme';
 import { getScanSession, upsertScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
 import { ObjectSelection, ScanSession } from '../types/scanSession';
@@ -81,6 +81,8 @@ function buildIssueGuidance(issue: AutoCaptureIssue): GuidanceMessage {
 }
 
 export function ScanScreen({ route, navigation }: Props) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const { scanId } = route.params;
   const isFocused = useIsFocused();
   const camera = React.useRef<Camera | null>(null);
@@ -361,7 +363,9 @@ export function ScanScreen({ route, navigation }: Props) {
               style={styles.captureButton}>
               <View style={[styles.captureIndicatorOuter, !hasObjectSelection && styles.captureIndicatorDisabled]}>
                 <View style={styles.captureIndicatorInner}>
-                  {autoCapture.isCapturing ? <ActivityIndicator color="#0B1020" /> : null}
+                  {autoCapture.isCapturing ? (
+                    <ActivityIndicator color={theme.colors.primaryContrast} />
+                  ) : null}
                 </View>
               </View>
             </Pressable>
@@ -380,130 +384,139 @@ export function ScanScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  cameraFallback: {
-    backgroundColor: '#060A16',
-  },
-  overlay: {
-    flex: 1,
-  },
-  selectionGuideLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  selectionGuideBox: {
-    position: 'absolute',
-    borderRadius: theme.radius.md,
-    borderWidth: 2,
-    borderColor: 'rgba(255,209,102,0.8)',
-    backgroundColor: 'rgba(255,209,102,0.08)',
-  },
-  ghostGuideBox: {
-    position: 'absolute',
-    borderRadius: theme.radius.md,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(143,223,255,0.9)',
-    backgroundColor: 'rgba(143,223,255,0.08)',
-  },
-  selectionGuideBoxReady: {
-    borderColor: '#8FDFFF',
-    backgroundColor: 'rgba(143,223,255,0.16)',
-    shadowColor: '#8FDFFF',
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  selectionGuideBoxWarning: {
-    borderColor: 'rgba(255,209,102,0.9)',
-    backgroundColor: 'rgba(255,209,102,0.12)',
-  },
-  selectionGuideBoxError: {
-    borderColor: 'rgba(255,107,107,0.92)',
-    backgroundColor: 'rgba(255,107,107,0.12)',
-  },
-  ghostArrowBadge: {
-    position: 'absolute',
-    borderRadius: 999,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(8,16,31,0.9)',
-  },
-  ghostArrowLeft: {
-    left: theme.spacing.xs,
-    top: '50%',
-    transform: [{ translateY: -12 }],
-  },
-  ghostArrowRight: {
-    right: theme.spacing.xs,
-    top: '50%',
-    transform: [{ translateY: -12 }],
-  },
-  ghostArrowTop: {
-    top: theme.spacing.xs,
-    alignSelf: 'center',
-  },
-  ghostArrowText: {
-    color: '#C8F1FF',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  captureHud: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: theme.spacing.lg,
-  },
-  captureArea: {
-    width: 236,
-    height: 236,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureButton: {
-    position: 'absolute',
-    width: 92,
-    height: 92,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureIndicatorOuter: {
-    position: 'absolute',
-    width: 92,
-    height: 92,
-    borderRadius: 999,
-    borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  captureIndicatorInner: {
-    width: 66,
-    height: 66,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureIndicatorDisabled: {
-    opacity: 0.5,
-  },
-  fallback: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    justifyContent: 'center',
-    padding: theme.spacing.lg,
-    gap: theme.spacing.md,
-  },
-  fallbackTitle: {
-    color: theme.colors.text,
-    fontWeight: '700',
-    fontSize: 18,
-    textAlign: 'center',
-  },
-});
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.cameraBackdrop,
+    },
+    cameraFallback: {
+      backgroundColor: theme.colors.cameraBackdrop,
+    },
+    overlay: {
+      flex: 1,
+    },
+    selectionGuideLayer: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    selectionGuideBox: {
+      position: 'absolute',
+      borderRadius: theme.radius.md,
+      borderWidth: 2,
+      borderColor: theme.colors.cameraGuide,
+      backgroundColor: theme.colors.cameraGuideSoft,
+    },
+    ghostGuideBox: {
+      position: 'absolute',
+      borderRadius: theme.radius.md,
+      borderWidth: 2,
+      borderStyle: 'dashed',
+      borderColor: theme.colors.cameraReady,
+      backgroundColor: theme.colors.cameraReadySoft,
+    },
+    selectionGuideBoxReady: {
+      borderColor: theme.colors.cameraReady,
+      backgroundColor: theme.colors.cameraReadySoft,
+      shadowColor: theme.colors.cameraReady,
+      shadowOpacity: 0.4,
+      shadowRadius: 12,
+      elevation: 4,
+    },
+    selectionGuideBoxWarning: {
+      borderColor: theme.colors.cameraGuide,
+      backgroundColor: theme.colors.cameraGuideSoft,
+    },
+    selectionGuideBoxError: {
+      borderColor: theme.colors.danger,
+      backgroundColor: theme.colors.dangerSoft,
+    },
+    ghostArrowBadge: {
+      position: 'absolute',
+      borderRadius: theme.radius.pill,
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: 4,
+      backgroundColor: theme.colors.cameraPanel,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+    },
+    ghostArrowLeft: {
+      left: theme.spacing.xs,
+      top: '50%',
+      transform: [{ translateY: -12 }],
+    },
+    ghostArrowRight: {
+      right: theme.spacing.xs,
+      top: '50%',
+      transform: [{ translateY: -12 }],
+    },
+    ghostArrowTop: {
+      top: theme.spacing.xs,
+      alignSelf: 'center',
+    },
+    ghostArrowText: {
+      color: theme.colors.cameraText,
+      fontFamily: theme.typography.label.fontFamily,
+      fontSize: 12,
+      fontWeight: theme.typography.label.fontWeight,
+      letterSpacing: 1,
+    },
+    captureHud: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      paddingBottom: theme.spacing.lg,
+    },
+    captureArea: {
+      width: 236,
+      height: 236,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    captureButton: {
+      position: 'absolute',
+      width: 92,
+      height: 92,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    captureIndicatorOuter: {
+      position: 'absolute',
+      width: 92,
+      height: 92,
+      borderRadius: theme.radius.pill,
+      borderWidth: 4,
+      borderColor: theme.colors.cameraControlOuter,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.cameraControlOuterSoft,
+      ...theme.shadows.floating,
+    },
+    captureIndicatorInner: {
+      width: 66,
+      height: 66,
+      borderRadius: theme.radius.pill,
+      backgroundColor: theme.colors.cameraControlInner,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    captureIndicatorDisabled: {
+      opacity: 0.5,
+    },
+    fallback: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      justifyContent: 'center',
+      padding: theme.spacing.lg,
+      gap: theme.spacing.md,
+    },
+    fallbackTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.title.fontFamily,
+      fontSize: theme.typography.title.fontSize,
+      lineHeight: theme.typography.title.lineHeight,
+      fontWeight: theme.typography.title.fontWeight,
+      letterSpacing: theme.typography.title.letterSpacing,
+      textAlign: 'center',
+    },
+  });
+}

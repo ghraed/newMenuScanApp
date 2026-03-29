@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { theme } from '../lib/theme';
+import { AppTheme, useAppTheme } from '../lib/theme';
 
 type Props = {
   slotsTotal?: number;
@@ -15,6 +15,8 @@ export function CaptureRing({
   size = 180,
   activeSlot = null,
 }: Props) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const capturedSet = useMemo(() => new Set(capturedSlots), [capturedSlots]);
   const radius = size / 2 - 12;
   const segmentHeight = slotsTotal > 36 ? 10 : slotsTotal > 24 ? 12 : 14;
@@ -30,8 +32,8 @@ export function CaptureRing({
           height: segmentHeight,
           left: size / 2 - segmentWidth / 2,
           top: size / 2 - segmentHeight / 2,
-          backgroundColor: isCaptured ? '#4ADE80' : '#6B7280',
-          opacity: isCaptured ? 1 : 0.75,
+          backgroundColor: isCaptured ? theme.colors.primary : theme.colors.cameraControlOuterSoft,
+          opacity: isCaptured ? 1 : 0.82,
           transform: [{ rotate: `${(360 / slotsTotal) * slot}deg` }, { translateY: -radius }],
         } as const;
 
@@ -46,21 +48,23 @@ export function CaptureRing({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segmentBase: {
-    position: 'absolute',
-    borderRadius: 999,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  activeSegment: {
-    shadowColor: theme.colors.primary,
-    shadowOpacity: 0.6,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-});
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    segmentBase: {
+      position: 'absolute',
+      borderRadius: theme.radius.pill,
+      borderWidth: 0.5,
+      borderColor: theme.colors.borderSoft,
+    },
+    activeSegment: {
+      shadowColor: theme.colors.cameraReady,
+      shadowOpacity: 0.65,
+      shadowRadius: 6,
+      elevation: 3,
+    },
+  });
+}

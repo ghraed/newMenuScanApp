@@ -4,7 +4,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import { CAPTURE_PATTERNS, getDefaultCapturePattern } from '../lib/captureGuidance';
-import { theme } from '../lib/theme';
+import { AppTheme, useAppTheme } from '../lib/theme';
 import { createScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
 import { ScanCaptureMode, ScanTargetType } from '../types/scanSession';
@@ -25,6 +25,8 @@ const MIN_OBJECT_SIZE = 0.04;
 const MAX_OBJECT_SIZE = 2.0;
 
 export function SetupScreen({ navigation }: Props) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [selectedTargetType, setSelectedTargetType] = useState<ScanTargetType>(DEFAULT_OBJECT_TYPE);
   const [selectedCaptureMode, setSelectedCaptureMode] = useState<ScanCaptureMode>(DEFAULT_CAPTURE_MODE);
   const [dishSizeInput, setDishSizeInput] = useState(String(DEFAULT_OBJECT_SIZES[DEFAULT_OBJECT_TYPE]));
@@ -144,6 +146,7 @@ export function SetupScreen({ navigation }: Props) {
           keyboardType="decimal-pad"
           placeholder="0.24"
           placeholderTextColor={theme.colors.textMuted}
+          selectionColor={theme.colors.primary}
           style={styles.input}
         />
         <Text style={[styles.helper, !isValid && styles.helperError]}>{helperText}</Text>
@@ -207,117 +210,154 @@ export function SetupScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.sm,
-  },
-  label: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  input: {
-    color: theme.colors.text,
-    backgroundColor: theme.colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    fontSize: 16,
-  },
-  helper: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  helperError: {
-    color: theme.colors.danger,
-  },
-  quickRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  quickButton: {
-    flex: 1,
-  },
-  optionList: {
-    gap: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  optionCard: {
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-    padding: theme.spacing.md,
-    gap: theme.spacing.xs,
-  },
-  optionCardSelected: {
-    borderColor: theme.colors.primary,
-    backgroundColor: 'rgba(92,180,255,0.12)',
-  },
-  optionTitle: {
-    color: theme.colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  optionDescription: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  patternList: {
-    gap: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  patternCard: {
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceAlt,
-    padding: theme.spacing.md,
-    gap: theme.spacing.xs,
-  },
-  patternCardSelected: {
-    borderColor: theme.colors.primary,
-    backgroundColor: 'rgba(92,180,255,0.12)',
-  },
-  patternHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing.sm,
-  },
-  patternTitle: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  patternDescription: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  patternStages: {
-    color: '#D8E6FF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  recommendedBadge: {
-    borderRadius: 999,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs,
-    backgroundColor: 'rgba(74,222,128,0.16)',
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.45)',
-  },
-  recommendedBadgeText: {
-    color: theme.colors.success,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    card: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.xl,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.lg,
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    label: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    input: {
+      color: theme.colors.text,
+      backgroundColor: theme.colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      fontFamily: theme.typography.body.fontFamily,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
+      fontWeight: theme.typography.body.fontWeight,
+      letterSpacing: theme.typography.body.letterSpacing,
+    },
+    helper: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    helperError: {
+      color: theme.colors.danger,
+    },
+    quickRow: {
+      flexDirection: 'row',
+      gap: theme.spacing.sm,
+      marginTop: theme.spacing.sm,
+    },
+    quickButton: {
+      flex: 1,
+    },
+    optionList: {
+      gap: theme.spacing.sm,
+      marginTop: theme.spacing.sm,
+    },
+    optionCard: {
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: theme.colors.surfaceAlt,
+      padding: theme.spacing.md,
+      gap: theme.spacing.xs,
+    },
+    optionCardSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primarySoft,
+      ...theme.shadows.highlight,
+    },
+    optionTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: 0.2,
+    },
+    optionDescription: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    patternList: {
+      gap: theme.spacing.sm,
+      marginTop: theme.spacing.sm,
+    },
+    patternCard: {
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: theme.colors.surfaceAlt,
+      padding: theme.spacing.md,
+      gap: theme.spacing.xs,
+    },
+    patternCardSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primarySoft,
+      ...theme.shadows.highlight,
+    },
+    patternHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.sm,
+    },
+    patternTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.title.fontFamily,
+      fontSize: 18,
+      lineHeight: 24,
+      fontWeight: theme.typography.title.fontWeight,
+      letterSpacing: theme.typography.title.letterSpacing,
+    },
+    patternDescription: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    patternStages: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: '500',
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    recommendedBadge: {
+      borderRadius: theme.radius.pill,
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: theme.spacing.xs,
+      backgroundColor: theme.colors.primarySoft,
+      borderWidth: 1,
+      borderColor: theme.colors.primary,
+    },
+    recommendedBadgeText: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.label.fontFamily,
+      fontSize: theme.typography.label.fontSize,
+      lineHeight: theme.typography.label.lineHeight,
+      fontWeight: theme.typography.label.fontWeight,
+      letterSpacing: theme.typography.label.letterSpacing,
+      textTransform: theme.typography.label.textTransform,
+    },
+  });
+}

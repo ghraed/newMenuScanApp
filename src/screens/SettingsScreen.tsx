@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -18,7 +18,7 @@ import {
   setApiBaseUrl,
   setApiKey,
 } from '../api/config';
-import { theme } from '../lib/theme';
+import { AppTheme, useAppTheme } from '../lib/theme';
 import { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
@@ -29,6 +29,8 @@ type TestState =
   | { kind: 'error'; message: string };
 
 export function SettingsScreen({ navigation }: Props) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [baseUrlInput, setBaseUrlInput] = useState(() => getApiBaseUrl());
   const [apiKeyInput, setApiKeyInput] = useState(() => getApiKey() ?? '');
   const [isSaving, setIsSaving] = useState(false);
@@ -138,6 +140,7 @@ export function SettingsScreen({ navigation }: Props) {
           keyboardType="url"
           placeholder="https://scan.rozer.fun"
           placeholderTextColor={theme.colors.textMuted}
+          selectionColor={theme.colors.primary}
           style={styles.input}
         />
         <Text style={styles.helper}>Example: `https://scan.rozer.fun` (root URL, no `/api`)</Text>
@@ -150,6 +153,7 @@ export function SettingsScreen({ navigation }: Props) {
           autoCorrect={false}
           placeholder="Enter backend API key"
           placeholderTextColor={theme.colors.textMuted}
+          selectionColor={theme.colors.primary}
           secureTextEntry
           style={styles.input}
         />
@@ -160,14 +164,14 @@ export function SettingsScreen({ navigation }: Props) {
         <View style={styles.row}>
           <AppButton
             title={isSaving ? 'Saving...' : 'Save'}
-            onPress={() => void onSave()}
+            onPress={onSave}
             disabled={isSaving || isTesting}
             style={styles.rowButton}
           />
           <AppButton
             title={isTesting ? 'Testing...' : 'Test Connection'}
             variant="secondary"
-            onPress={() => void onTestConnection()}
+            onPress={onTestConnection}
             disabled={isTesting || isSaving}
             style={styles.rowButton}
           />
@@ -191,50 +195,68 @@ export function SettingsScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.sm,
-  },
-  label: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  input: {
-    color: theme.colors.text,
-    backgroundColor: theme.colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    fontSize: 15,
-  },
-  helper: {
-    color: theme.colors.textMuted,
-    fontSize: 12,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  rowButton: {
-    flex: 1,
-  },
-  statusText: {
-    fontSize: 13,
-    marginTop: theme.spacing.xs,
-  },
-  statusSuccess: {
-    color: theme.colors.success,
-  },
-  statusError: {
-    color: theme.colors.danger,
-  },
-});
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    card: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.xl,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.lg,
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    label: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    input: {
+      color: theme.colors.text,
+      backgroundColor: theme.colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      fontFamily: theme.typography.body.fontFamily,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
+      fontWeight: theme.typography.body.fontWeight,
+      letterSpacing: theme.typography.body.letterSpacing,
+    },
+    helper: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: theme.spacing.sm,
+      marginTop: theme.spacing.sm,
+    },
+    rowButton: {
+      flex: 1,
+    },
+    statusText: {
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: '500',
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+      marginTop: theme.spacing.xs,
+    },
+    statusSuccess: {
+      color: theme.colors.success,
+    },
+    statusError: {
+      color: theme.colors.danger,
+    },
+  });
+}

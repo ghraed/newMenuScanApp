@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   FlatList,
   Pressable,
@@ -10,7 +10,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
-import { theme } from '../lib/theme';
+import { AppTheme, useAppTheme } from '../lib/theme';
 import { deleteScanSession, listScanSessions } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
 import { ScanSession } from '../types/scanSession';
@@ -18,6 +18,8 @@ import { ScanSession } from '../types/scanSession';
 type Props = NativeStackScreenProps<RootStackParamList, 'MyScans'>;
 
 export function MyScansScreen({ navigation }: Props) {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [scans, setScans] = React.useState<ScanSession[]>([]);
 
   const reload = React.useCallback(() => {
@@ -46,7 +48,7 @@ export function MyScansScreen({ navigation }: Props) {
         variant="danger"
         style={styles.rowDelete}
         onPress={() => {
-          void deleteScanSession(item.id).then(reload);
+          deleteScanSession(item.id).then(reload);
         }}
       />
     </View>
@@ -76,53 +78,72 @@ export function MyScansScreen({ navigation }: Props) {
 }
 
 function ListSeparator() {
+  const { theme } = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return <View style={styles.listSeparator} />;
 }
 
-const styles = StyleSheet.create({
-  listContent: {
-    paddingBottom: theme.spacing.xxl,
-  },
-  listSeparator: {
-    height: theme.spacing.md,
-  },
-  row: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  rowMain: {
-    flex: 1,
-    gap: theme.spacing.xs,
-  },
-  rowPrimary: {
-    color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  rowSecondary: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-  },
-  rowDelete: {
-    minWidth: 92,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-  },
-  empty: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.md,
-  },
-  emptyText: {
-    color: theme.colors.textMuted,
-  },
-});
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    listContent: {
+      paddingBottom: theme.spacing.xxl,
+    },
+    listSeparator: {
+      height: theme.spacing.md,
+    },
+    row: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.xl,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    rowMain: {
+      flex: 1,
+      gap: theme.spacing.xs,
+    },
+    rowPrimary: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: 0.2,
+    },
+    rowSecondary: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    rowDelete: {
+      minWidth: 92,
+      paddingVertical: theme.spacing.sm,
+      paddingHorizontal: theme.spacing.md,
+    },
+    empty: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.xl,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.lg,
+      gap: theme.spacing.md,
+      ...theme.shadows.card,
+    },
+    emptyText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.body.fontFamily,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
+      fontWeight: theme.typography.body.fontWeight,
+      letterSpacing: theme.typography.body.letterSpacing,
+    },
+  });
+}
