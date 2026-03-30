@@ -20,6 +20,8 @@ type ImageEditingManager = {
     cropData: {
       offset: { x: number; y: number };
       size: { width: number; height: number };
+      displaySize?: { width: number; height: number };
+      resizeMode?: 'contain' | 'cover' | 'stretch';
       allowExternalStorage?: boolean;
     },
     successCallback: (uri: string) => void,
@@ -43,6 +45,7 @@ const objectSelectionCropModule = NativeModules.ObjectSelectionCropModule as
   | ObjectSelectionCropModule
   | undefined;
 const SELECTION_CROP_PADDING_RATIO = 0.08;
+const MAX_UPLOAD_DIMENSION = 2000;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -104,6 +107,53 @@ function getSelectionCropRect(selection: ObjectSelection, imageSize: ImageSize):
   };
 }
 
+function getFullImageRect(imageSize: ImageSize): CropRect {
+  return {
+    x: 0,
+    y: 0,
+    width: imageSize.width,
+    height: imageSize.height,
+  };
+}
+
+function getConstrainedDisplaySize(cropRect: CropRect, maxDimension: number): ImageSize | undefined {
+  const largest = Math.max(cropRect.width, cropRect.height);
+
+  if (largest <= maxDimension) {
+    return undefined;
+  }
+
+  const scale = maxDimension / largest;
+
+  return {
+    width: Math.max(1, Math.round(cropRect.width * scale)),
+    height: Math.max(1, Math.round(cropRect.height * scale)),
+  };
+}
+
+async function cropAndResizeImageUri(sourceUri: string, cropRect: CropRect): Promise<string> {
+  if (!imageEditingManager?.cropImage) {
+    return sourceUri;
+  }
+
+  const displaySize = getConstrainedDisplaySize(cropRect, MAX_UPLOAD_DIMENSION);
+
+  return new Promise((resolve, reject) => {
+    imageEditingManager.cropImage(
+      sourceUri,
+      {
+        offset: { x: cropRect.x, y: cropRect.y },
+        size: { width: cropRect.width, height: cropRect.height },
+        displaySize,
+        resizeMode: 'contain',
+        allowExternalStorage: true,
+      },
+      resolve,
+      error => reject(new Error(error)),
+    );
+  });
+}
+
 async function cropImageUriToSelection(
   sourceUri: string,
   selection: ObjectSelection,
@@ -114,19 +164,7 @@ async function cropImageUriToSelection(
 
   const imageSize = await getImageSize(sourceUri);
   const cropRect = getSelectionCropRect(selection, imageSize);
-
-  return new Promise((resolve, reject) => {
-    imageEditingManager.cropImage(
-      sourceUri,
-      {
-        offset: { x: cropRect.x, y: cropRect.y },
-        size: { width: cropRect.width, height: cropRect.height },
-        allowExternalStorage: true,
-      },
-      resolve,
-      error => reject(new Error(error)),
-    );
-  });
+  return cropAndResizeImageUri(sourceUri, cropRect);
 }
 
 function getOutputExtension(sourcePath: string) {
@@ -172,11 +210,17 @@ export async function getSelectionUploadUri(
 ): Promise<string> {
   const sourceUri = toFileUri(sourcePath);
 
-  if (!selection) {
-    return sourceUri;
-  }
-
   try {
+    const imageSize = await getImageSize(sourceUri);
+
+    if (!selection) {
+      return await cropAndResizeImageUri(sourceUri, getFullImageRect(imageSize));
+    }
+
+    if (imageEditingManager?.cropImage) {
+      return await cropAndResizeImageUri(sourceUri, getSelectionCropRect(selection, imageSize));
+    }
+
     const cropsDir = `${RNFS.CachesDirectoryPath}/selection-crops`;
     await RNFS.mkdir(cropsDir);
 
