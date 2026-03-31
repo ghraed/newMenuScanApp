@@ -27,15 +27,17 @@ export function AppButton({
 }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const rippleColor = variant === 'danger' ? theme.colors.dangerSoft : theme.colors.primarySoft;
 
   return (
     <Pressable
       disabled={disabled}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.primarySoft }}
+      android_ripple={{ color: rippleColor }}
       style={({ pressed }) => [
         styles.base,
         styles[variant],
+        variant === 'danger' && !theme.isDark ? styles.dangerLightFlat : null,
         disabled && styles.disabled,
         pressed && !disabled && styles.pressed,
         style,
@@ -74,8 +76,14 @@ function createStyles(theme: AppTheme) {
       borderColor: theme.colors.border,
     },
     danger: {
-      backgroundColor: theme.isDark ? theme.colors.dangerSoft : 'transparent',
-      borderColor: theme.colors.danger,
+      backgroundColor: theme.isDark ? theme.colors.dangerSoft : '#E7D2CD',
+      borderColor: theme.isDark ? theme.colors.danger : '#B88479',
+    },
+    dangerLightFlat: {
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
     },
     disabled: {
       opacity: 0.45,
@@ -100,7 +108,7 @@ function createStyles(theme: AppTheme) {
       color: theme.colors.text,
     },
     dangerLabel: {
-      color: theme.colors.danger,
+      color: theme.isDark ? theme.colors.danger : '#6F3832',
     },
   });
 }
