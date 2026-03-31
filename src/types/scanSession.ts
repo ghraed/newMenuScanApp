@@ -63,6 +63,10 @@ export type ScanSessionStatus =
 export type ScanSession = {
   id: string;
   createdAt: number;
+  restaurantId?: number;
+  dishId?: number;
+  dishName?: string;
+  publishOnCreate?: boolean;
   targetType: ScanTargetType;
   captureMode: ScanCaptureMode;
   scaleMeters: number;
@@ -88,6 +92,8 @@ export type ScanSession = {
   bgOutputs?: Record<string, BackgroundOutput>;
   outputs?: {
     glbUrl?: string;
+    glbSignedUrl?: string;
     usdzUrl?: string;
+    usdzSignedUrl?: string;
   };
 };

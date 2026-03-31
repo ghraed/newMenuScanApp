@@ -14,9 +14,12 @@ import {
   getApiBaseUrl,
   getApiKey,
   getHealthUrl,
+  getMenuApiBaseUrl,
+  getMenuHealthUrl,
   resetApiKey,
   setApiBaseUrl,
   setApiKey,
+  setMenuApiBaseUrl,
 } from '../api/config';
 import { AppTheme, useAppTheme } from '../lib/theme';
 import { RootStackParamList } from '../types/navigation';
@@ -28,48 +31,62 @@ type TestState =
   | { kind: 'success'; message: string }
   | { kind: 'error'; message: string };
 
+type ConnectionTarget = 'scan' | 'menu';
+
 export function SettingsScreen({ navigation }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const [baseUrlInput, setBaseUrlInput] = useState(() => getApiBaseUrl());
+  const [scanBaseUrlInput, setScanBaseUrlInput] = useState(() => getApiBaseUrl());
+  const [menuBaseUrlInput, setMenuBaseUrlInput] = useState(() => getMenuApiBaseUrl());
   const [apiKeyInput, setApiKeyInput] = useState(() => getApiKey() ?? '');
   const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
+  const [isTesting, setIsTesting] = useState<ConnectionTarget | null>(null);
   const [testState, setTestState] = useState<TestState>({ kind: 'idle' });
 
   useFocusEffect(
     React.useCallback(() => {
-      setBaseUrlInput(getApiBaseUrl());
+      setScanBaseUrlInput(getApiBaseUrl());
+      setMenuBaseUrlInput(getMenuApiBaseUrl());
       setApiKeyInput(getApiKey() ?? '');
     }, []),
   );
 
-  const normalizedInput = baseUrlInput.trim().replace(/\/+$/, '');
+  const normalizedScanUrl = scanBaseUrlInput.trim().replace(/\/+$/, '');
+  const normalizedMenuUrl = menuBaseUrlInput.trim().replace(/\/+$/, '');
   const normalizedApiKey = apiKeyInput.trim();
-  const isValidUrl = /^https?:\/\/.+/i.test(normalizedInput);
+  const isValidScanUrl = /^https?:\/\/.+/i.test(normalizedScanUrl);
+  const isValidMenuUrl = /^https?:\/\/.+/i.test(normalizedMenuUrl);
 
   const onSave = async () => {
-    if (!isValidUrl) {
-      setTestState({ kind: 'error', message: 'Enter a valid http:// or https:// URL.' });
+    if (!isValidScanUrl || !isValidMenuUrl) {
+      setTestState({
+        kind: 'error',
+        message: 'Enter valid http:// or https:// URLs for both APIs.',
+      });
       return;
     }
 
     try {
       setIsSaving(true);
-      const savedUrl = setApiBaseUrl(normalizedInput);
-      setBaseUrlInput(savedUrl);
+      const savedScanUrl = setApiBaseUrl(normalizedScanUrl);
+      const savedMenuUrl = setMenuApiBaseUrl(normalizedMenuUrl);
+      setScanBaseUrlInput(savedScanUrl);
+      setMenuBaseUrlInput(savedMenuUrl);
 
-      let keyStatus = 'API key cleared';
+      let keyStatus = 'Scan API key cleared';
       if (normalizedApiKey) {
         const savedKey = setApiKey(normalizedApiKey);
         setApiKeyInput(savedKey);
-        keyStatus = 'API key saved';
+        keyStatus = 'Scan API key saved';
       } else {
         resetApiKey();
         setApiKeyInput('');
       }
 
-      setTestState({ kind: 'success', message: `Saved: ${savedUrl} | ${keyStatus}` });
+      setTestState({
+        kind: 'success',
+        message: `Saved scan API: ${savedScanUrl} | menu API: ${savedMenuUrl} | ${keyStatus}`,
+      });
     } catch (error) {
       setTestState({
         kind: 'error',
@@ -80,22 +97,30 @@ export function SettingsScreen({ navigation }: Props) {
     }
   };
 
-  const onTestConnection = async () => {
+  const onTestConnection = async (target: ConnectionTarget) => {
+    const normalizedUrl = target === 'scan' ? normalizedScanUrl : normalizedMenuUrl;
+    const isValidUrl = target === 'scan' ? isValidScanUrl : isValidMenuUrl;
+
     if (!isValidUrl) {
-      setTestState({ kind: 'error', message: 'Enter a valid http:// or https:// URL.' });
+      setTestState({
+        kind: 'error',
+        message: `Enter a valid ${target === 'scan' ? 'scan' : 'menu'} API URL first.`,
+      });
       return;
     }
 
     try {
-      setIsTesting(true);
+      setIsTesting(target);
       setTestState({ kind: 'idle' });
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 
       try {
+        const defaultHealthUrl = target === 'scan' ? getHealthUrl() : getMenuHealthUrl();
+        const savedBaseUrl = target === 'scan' ? getApiBaseUrl() : getMenuApiBaseUrl();
         const response = await fetch(
-          normalizedInput === getApiBaseUrl() ? getHealthUrl() : `${normalizedInput}/up`,
+          normalizedUrl === savedBaseUrl ? defaultHealthUrl : `${normalizedUrl}/up`,
           {
             method: 'GET',
             signal: controller.signal,
@@ -105,12 +130,12 @@ export function SettingsScreen({ navigation }: Props) {
         if (response.ok) {
           setTestState({
             kind: 'success',
-            message: `Connection OK (${response.status})`,
+            message: `${target === 'scan' ? 'Scan' : 'Menu'} API connection OK (${response.status})`,
           });
         } else {
           setTestState({
             kind: 'error',
-            message: `Connection failed (HTTP ${response.status})`,
+            message: `${target === 'scan' ? 'Scan' : 'Menu'} API failed (HTTP ${response.status})`,
           });
         }
       } finally {
@@ -122,19 +147,19 @@ export function SettingsScreen({ navigation }: Props) {
         message: error instanceof Error ? error.message : 'Connection test failed.',
       });
     } finally {
-      setIsTesting(false);
+      setIsTesting(null);
     }
   };
 
   return (
     <Screen
       title="Settings"
-      subtitle="Configure the backend API base URL and API key used for scan uploads and job polling.">
+      subtitle="Configure the scan backend and the main menu API used for restaurant login and dish creation.">
       <View style={styles.card}>
-        <Text style={styles.label}>Backend API Base URL</Text>
+        <Text style={styles.label}>Scan API Base URL</Text>
         <TextInput
-          value={baseUrlInput}
-          onChangeText={setBaseUrlInput}
+          value={scanBaseUrlInput}
+          onChangeText={setScanBaseUrlInput}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
@@ -143,41 +168,68 @@ export function SettingsScreen({ navigation }: Props) {
           selectionColor={theme.colors.primary}
           style={styles.input}
         />
-        <Text style={styles.helper}>Example: `https://scan.rozer.fun` (root URL, no `/api`)</Text>
+        <Text style={styles.helper}>Used for scan uploads, background removal, and model jobs.</Text>
 
-        <Text style={styles.label}>Scan API Key (X-API-KEY)</Text>
+        <Text style={styles.label}>Menu API Base URL</Text>
+        <TextInput
+          value={menuBaseUrlInput}
+          onChangeText={setMenuBaseUrlInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          placeholder="https://rozer.fun"
+          placeholderTextColor={theme.colors.textMuted}
+          selectionColor={theme.colors.primary}
+          style={styles.input}
+        />
+        <Text style={styles.helper}>Used for restaurant login, dish creation, and dish listing.</Text>
+
+        <Text style={styles.label}>Optional Scan API Key</Text>
         <TextInput
           value={apiKeyInput}
           onChangeText={setApiKeyInput}
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="Enter backend API key"
+          placeholder="Enter scan API key if required"
           placeholderTextColor={theme.colors.textMuted}
           selectionColor={theme.colors.primary}
           secureTextEntry
           style={styles.input}
         />
         <Text style={styles.helper}>
-          Required when the backend sets `API_KEY`. Leave empty to clear the saved key.
+          Leave empty unless the scan backend still expects `X-API-KEY`.
         </Text>
+
+        <AppButton
+          title={isSaving ? 'Saving...' : 'Save'}
+          onPress={() => {
+            onSave().catch(() => undefined);
+          }}
+          disabled={isSaving || Boolean(isTesting)}
+        />
 
         <View style={styles.row}>
           <AppButton
-            title={isSaving ? 'Saving...' : 'Save'}
-            onPress={onSave}
-            disabled={isSaving || isTesting}
+            title={isTesting === 'scan' ? 'Testing Scan...' : 'Test Scan API'}
+            variant="secondary"
+            onPress={() => {
+              onTestConnection('scan').catch(() => undefined);
+            }}
+            disabled={Boolean(isTesting) || isSaving}
             style={styles.rowButton}
           />
           <AppButton
-            title={isTesting ? 'Testing...' : 'Test Connection'}
+            title={isTesting === 'menu' ? 'Testing Menu...' : 'Test Menu API'}
             variant="secondary"
-            onPress={onTestConnection}
-            disabled={isTesting || isSaving}
+            onPress={() => {
+              onTestConnection('menu').catch(() => undefined);
+            }}
+            disabled={Boolean(isTesting) || isSaving}
             style={styles.rowButton}
           />
         </View>
 
-        {(isSaving || isTesting) && <ActivityIndicator color={theme.colors.primary} />}
+        {(isSaving || isTesting) ? <ActivityIndicator color={theme.colors.primary} /> : null}
 
         {testState.kind !== 'idle' ? (
           <Text

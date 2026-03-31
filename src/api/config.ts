@@ -1,6 +1,7 @@
 import { createMMKV } from 'react-native-mmkv';
 
 export const API_BASE_URL = 'https://scan.rozer.fun';
+export const MENU_API_BASE_URL = 'https://rozer.fun';
 
 // Optional fallback key baked into the app build. Prefer configuring this in Settings.
 export const API_KEY: string | undefined = undefined;
@@ -9,6 +10,7 @@ export const API_PREFIX = '/api';
 
 const configStorage = createMMKV({ id: 'api-config-storage' });
 const API_BASE_URL_STORAGE_KEY = 'api:base-url';
+const MENU_API_BASE_URL_STORAGE_KEY = 'menu-api:base-url';
 const API_KEY_STORAGE_KEY = 'api:key';
 
 function normalizeBaseUrl(url: string) {
@@ -74,4 +76,36 @@ export function getApiUrl(): string {
 
 export function getHealthUrl(): string {
   return `${getApiBaseUrl()}/up`;
+}
+
+export function getMenuApiBaseUrl(): string {
+  const stored = configStorage.getString(MENU_API_BASE_URL_STORAGE_KEY);
+  if (!stored) {
+    return MENU_API_BASE_URL;
+  }
+
+  const normalized = normalizeBaseUrl(stored);
+  return normalized || MENU_API_BASE_URL;
+}
+
+export function setMenuApiBaseUrl(nextUrl: string): string {
+  const normalized = normalizeBaseUrl(nextUrl);
+  if (!normalized) {
+    throw new Error('Menu API base URL cannot be empty.');
+  }
+
+  configStorage.set(MENU_API_BASE_URL_STORAGE_KEY, normalized);
+  return normalized;
+}
+
+export function resetMenuApiBaseUrl(): void {
+  configStorage.remove(MENU_API_BASE_URL_STORAGE_KEY);
+}
+
+export function getMenuApiUrl(): string {
+  return `${getMenuApiBaseUrl()}${API_PREFIX}`;
+}
+
+export function getMenuHealthUrl(): string {
+  return `${getMenuApiBaseUrl()}/up`;
 }

@@ -5,6 +5,7 @@ import { ObjectSelection, ScanTargetType } from '../types/scanSession';
 
 const createScanResponseSchema = z.object({
   scanId: z.string().min(1),
+  dishId: z.number().int().positive().nullable().optional(),
 });
 
 const uploadImageResponseSchema = z.object({
@@ -54,7 +55,9 @@ const jobResponseSchema = z.object({
   outputs: z
     .object({
       glbUrl: z.string().optional(),
+      glbSignedUrl: z.string().optional(),
       usdzUrl: z.string().optional(),
+      usdzSignedUrl: z.string().optional(),
     })
     .optional(),
 });
@@ -64,11 +67,13 @@ export type ApiCreateScanRequest = {
   targetType: ScanTargetType;
   scaleMeters: number;
   slotsTotal: number;
+  dishId?: number;
 };
 
 export type ApiCreateScanResponse = z.infer<typeof createScanResponseSchema>;
 export type ApiUploadImageResponse = z.infer<typeof uploadImageResponseSchema>;
 export type ApiSubmitScanResponse = z.infer<typeof submitScanResponseSchema>;
+export type ApiAttachScanDishResponse = z.infer<typeof createScanResponseSchema>;
 export type ApiStartBackgroundRemovalResponse = {
   jobId: string;
   status: 'queued' | 'processing' | 'partial' | 'ready' | 'canceled' | 'error';
@@ -181,6 +186,18 @@ export async function apiSubmitScan(scanId: string): Promise<ApiSubmitScanRespon
     return parseApiResponse(submitScanResponseSchema, response.data, 'apiSubmitScan');
   } catch (error) {
     throw toApiError(error, `Failed to submit scan ${scanId}`);
+  }
+}
+
+export async function apiAttachScanDish(
+  scanId: string,
+  dishId: number,
+): Promise<ApiAttachScanDishResponse> {
+  try {
+    const response = await apiClient.patch(`/scans/${scanId}/attach-dish`, { dishId });
+    return parseApiResponse(createScanResponseSchema, response.data, 'apiAttachScanDish');
+  } catch (error) {
+    throw toApiError(error, `Failed to attach dish to scan ${scanId}`);
   }
 }
 

@@ -6,8 +6,11 @@ import {
   Linking,
   PermissionsAndroid,
   Platform,
+  Pressable,
   StyleSheet,
+  Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import RNFS from 'react-native-fs';
@@ -16,6 +19,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import {
+  apiAttachScanDish,
   apiCancelJob,
   apiCreateScan,
   apiGetJob,
@@ -26,11 +30,13 @@ import {
   buildRgbaUrl,
 } from '../api/scansApi';
 import { getApiKey } from '../api/config';
+import { menuCreateDish, menuListDishes, MenuDish } from '../api/menuApi';
 import {
   cropFileToSelectionInPlace,
   getSelectionUploadUri,
 } from '../lib/objectSelectionImage';
 import { AppTheme, useAppTheme } from '../lib/theme';
+import { AuthUser, getAuthToken, getAuthUser } from '../storage/authStore';
 import {
   deleteScanBackgroundOutputs,
   deleteScanSession,
@@ -44,6 +50,11 @@ import { RootStackParamList } from '../types/navigation';
 import { BackgroundOutput, ScanSession } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Preview'>;
+
+type DishState =
+  | { kind: 'idle' }
+  | { kind: 'success'; message: string }
+  | { kind: 'error'; message: string };
 
 const BG_UPLOAD_CONCURRENCY = 3;
 const BG_FAST_POLL_MS = 1500;
@@ -158,11 +169,39 @@ function canRetryModelWithoutUpload(scan: ScanSession) {
   );
 }
 
+function buildDownloadHeaders() {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  const apiKey = getApiKey();
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (apiKey) {
+    headers['X-API-KEY'] = apiKey;
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 export function PreviewScreen({ route, navigation }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const { scanId } = route.params;
   const [scan, setScan] = useState<ScanSession | undefined>(() => getScanSession(scanId));
+  const [authUser, setAuthUser] = useState<AuthUser | undefined>(() => getAuthUser());
+  const [dishes, setDishes] = useState<MenuDish[]>([]);
+  const [isLoadingDishes, setIsLoadingDishes] = useState(false);
+  const [isCreatingDish, setIsCreatingDish] = useState(false);
+  const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
+  const [newDishName, setNewDishName] = useState('');
+  const [newDishDescription, setNewDishDescription] = useState('');
+  const [newDishPrice, setNewDishPrice] = useState('');
+  const [newDishCategory, setNewDishCategory] = useState('');
+  const [publishNewDish, setPublishNewDish] = useState<boolean>(
+    () => getScanSession(scanId)?.publishOnCreate ?? false,
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadingModel, setIsDownloadingModel] = useState(false);
@@ -176,8 +215,91 @@ export function PreviewScreen({ route, navigation }: Props) {
 
   useFocusEffect(
     React.useCallback(() => {
-      reload();
-    }, [reload]),
+      let isActive = true;
+
+      const loadContext = async () => {
+        const nextScan = getScanSession(scanId);
+        const nextAuthUser = getAuthUser();
+
+        if (isActive) {
+          setScan(nextScan);
+          setAuthUser(nextAuthUser);
+          setPublishNewDish(nextScan?.publishOnCreate ?? false);
+        }
+
+        if (!nextAuthUser?.restaurant) {
+          if (isActive) {
+            setDishes([]);
+          }
+          return;
+        }
+
+        try {
+          if (isActive) {
+            setIsLoadingDishes(true);
+            setDishState({ kind: 'idle' });
+          }
+
+          const loadedDishes = await menuListDishes();
+          if (!isActive) {
+            return;
+          }
+
+          setDishes(loadedDishes);
+
+          if (!nextScan) {
+            return;
+          }
+
+          const selectedDish = nextScan.dishId
+            ? loadedDishes.find(dish => dish.id === nextScan.dishId)
+            : undefined;
+
+          if (
+            selectedDish &&
+            (nextScan.dishName !== selectedDish.name ||
+              nextScan.restaurantId !== nextAuthUser.restaurant.id)
+          ) {
+            await upsertScanSession({
+              ...nextScan,
+              restaurantId: nextAuthUser.restaurant.id,
+              dishId: selectedDish.id,
+              dishName: selectedDish.name,
+            });
+            if (isActive) {
+              setScan(getScanSession(scanId));
+            }
+          } else if (!nextScan.restaurantId) {
+            await upsertScanSession({
+              ...nextScan,
+              restaurantId: nextAuthUser.restaurant.id,
+            });
+            if (isActive) {
+              setScan(getScanSession(scanId));
+            }
+          }
+        } catch (error) {
+          if (!isActive) {
+            return;
+          }
+
+          setDishState({
+            kind: 'error',
+            message: error instanceof Error ? error.message : 'Could not load dishes.',
+          });
+        } finally {
+          if (isActive) {
+            setIsLoadingDishes(false);
+          }
+        }
+      };
+
+      loadContext().catch(() => undefined);
+
+      return () => {
+        isActive = false;
+      };
+    }, [scanId]),
   );
 
   useEffect(() => {
@@ -206,11 +328,13 @@ export function PreviewScreen({ route, navigation }: Props) {
         targetType: session.targetType,
         scaleMeters: session.scaleMeters,
         slotsTotal: session.slotsTotal,
+        dishId: session.dishId,
       });
 
       return commitSession({
         ...session,
         remoteScanId: remote.scanId,
+        dishId: remote.dishId ?? session.dishId,
         message: undefined,
       });
     },
@@ -272,8 +396,10 @@ export function PreviewScreen({ route, navigation }: Props) {
             progress: 100,
             message: job.message,
             outputs: {
-              glbUrl: buildFileUrl(remoteScanId, 'glb'),
-              usdzUrl: job.outputs?.usdzUrl ? buildFileUrl(remoteScanId, 'usdz') : undefined,
+              glbUrl: job.outputs?.glbUrl ?? buildFileUrl(remoteScanId, 'glb'),
+              glbSignedUrl: job.outputs?.glbSignedUrl,
+              usdzUrl: job.outputs?.usdzUrl,
+              usdzSignedUrl: job.outputs?.usdzSignedUrl,
             },
           };
           return commitSession(readyScan);
@@ -351,12 +477,10 @@ export function PreviewScreen({ route, navigation }: Props) {
 
       await RNFS.mkdir(getScanBgDirectoryPath(session.id));
 
-      const apiKey = getApiKey();
-      const headers = apiKey ? { 'X-API-KEY': apiKey } : undefined;
       const result = await RNFS.downloadFile({
         fromUrl: buildRgbaUrl(remoteScanId, slot),
         toFile: targetPath,
-        headers,
+        headers: buildDownloadHeaders(),
       }).promise;
 
       if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -557,7 +681,12 @@ export function PreviewScreen({ route, navigation }: Props) {
           }
         }
 
-        const nextStatus = completedCount >= capturedSlots.length ? 'ready' : completedCount > 0 ? 'partial' : 'processing';
+        const nextStatus =
+          completedCount >= capturedSlots.length
+            ? 'ready'
+            : completedCount > 0
+              ? 'partial'
+              : 'processing';
         const nextMessage =
           completedCount >= capturedSlots.length
             ? 'Completed'
@@ -601,6 +730,136 @@ export function PreviewScreen({ route, navigation }: Props) {
     [commitSession, downloadBackgroundSlot],
   );
 
+  const selectDish = React.useCallback(
+    async (dish: MenuDish) => {
+      const latest = getScanSession(scanId) ?? scan;
+      if (!latest) {
+        return;
+      }
+
+      const next = await commitSession({
+        ...latest,
+        restaurantId: authUser?.restaurant?.id ?? latest.restaurantId,
+        dishId: dish.id,
+        dishName: dish.name,
+      });
+
+      setScan(next);
+      setDishState({ kind: 'success', message: `Dish selected: ${dish.name}` });
+    },
+    [authUser?.restaurant?.id, commitSession, scan, scanId],
+  );
+
+  const togglePublishPreference = React.useCallback(
+    async (value: boolean) => {
+      setPublishNewDish(value);
+      const latest = getScanSession(scanId) ?? scan;
+      if (!latest) {
+        return;
+      }
+
+      await commitSession({
+        ...latest,
+        publishOnCreate: value,
+      });
+    },
+    [commitSession, scan, scanId],
+  );
+
+  const createDish = React.useCallback(async () => {
+    if (!authUser?.restaurant) {
+      setDishState({
+        kind: 'error',
+        message: 'Log in from Home before creating dishes from the scanner app.',
+      });
+      return;
+    }
+
+    const name = newDishName.trim();
+    const category = newDishCategory.trim();
+    const price = Number.parseFloat(newDishPrice);
+
+    if (!name) {
+      setDishState({ kind: 'error', message: 'Enter a dish name.' });
+      return;
+    }
+
+    if (!category) {
+      setDishState({ kind: 'error', message: 'Enter a category for the new dish.' });
+      return;
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      setDishState({ kind: 'error', message: 'Enter a valid price.' });
+      return;
+    }
+
+    try {
+      setIsCreatingDish(true);
+      setDishState({ kind: 'idle' });
+
+      const createdDish = await menuCreateDish({
+        name,
+        description: newDishDescription.trim() || undefined,
+        price,
+        category,
+        status: publishNewDish ? 'published' : 'draft',
+      });
+
+      setDishes(current => [createdDish, ...current.filter(dish => dish.id !== createdDish.id)]);
+      await selectDish(createdDish);
+      setNewDishName('');
+      setNewDishDescription('');
+      setNewDishPrice('');
+      setNewDishCategory('');
+      setDishState({
+        kind: 'success',
+        message: publishNewDish
+          ? 'Dish created and published. It will stay hidden from guests until the model is ready.'
+          : 'Dish created as draft. It now appears in the website admin view.',
+      });
+    } catch (error) {
+      setDishState({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Could not create dish.',
+      });
+    } finally {
+      setIsCreatingDish(false);
+    }
+  }, [
+    authUser?.restaurant,
+    newDishCategory,
+    newDishDescription,
+    newDishName,
+    newDishPrice,
+    publishNewDish,
+    selectDish,
+  ]);
+
+  const ensureDishAttached = React.useCallback(
+    async (session: ScanSession): Promise<ScanSession> => {
+      if (!session.dishId) {
+        throw new Error('Select or create a dish before generating the 3D model.');
+      }
+
+      let current = await ensureRemoteScan(session);
+      const remoteScanId = current.remoteScanId;
+
+      if (!remoteScanId) {
+        throw new Error('Missing remote scan id');
+      }
+
+      const attached = await apiAttachScanDish(remoteScanId, session.dishId);
+      current = await commitSession({
+        ...current,
+        dishId: attached.dishId ?? session.dishId,
+      });
+
+      return current;
+    },
+    [commitSession, ensureRemoteScan],
+  );
+
   const runCreateModelFlow = React.useCallback(async () => {
     if (runningRef.current) {
       return;
@@ -609,6 +868,17 @@ export function PreviewScreen({ route, navigation }: Props) {
     const latest = getScanSession(scanId);
     if (!latest) {
       Alert.alert('Scan Missing', 'This scan session could not be found.');
+      return;
+    }
+    if (!authUser?.restaurant) {
+      Alert.alert('Login Required', 'Log in from Home before generating a 3D model.');
+      return;
+    }
+    if (!latest.dishId) {
+      Alert.alert(
+        'Dish Required',
+        'Select an existing dish or create a new one before generating the 3D model.',
+      );
       return;
     }
     if (latest.images.length === 0) {
@@ -622,7 +892,7 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
 
     try {
-      let current = await ensureRemoteScan(latest);
+      let current = await ensureDishAttached(latest);
       const remoteScanId = current.remoteScanId;
 
       if (!remoteScanId) {
@@ -702,7 +972,15 @@ export function PreviewScreen({ route, navigation }: Props) {
         setIsSubmitting(false);
       }
     }
-  }, [commitSession, ensureRemoteScan, pollJobUntilDone, scan, scanId, uploadWithRetry]);
+  }, [
+    authUser?.restaurant,
+    commitSession,
+    ensureDishAttached,
+    pollJobUntilDone,
+    scan,
+    scanId,
+    uploadWithRetry,
+  ]);
 
   const runBackgroundRemovalFlow = React.useCallback(
     async (showReadyAlert: boolean) => {
@@ -713,6 +991,10 @@ export function PreviewScreen({ route, navigation }: Props) {
       const latest = getScanSession(scanId) ?? scan;
       if (!latest) {
         Alert.alert('Scan Missing', 'This scan session could not be found.');
+        return;
+      }
+      if (!authUser?.restaurant) {
+        Alert.alert('Login Required', 'Log in from Home before generating background-removed images.');
         return;
       }
       if (latest.images.length === 0) {
@@ -850,6 +1132,7 @@ export function PreviewScreen({ route, navigation }: Props) {
       }
     },
     [
+      authUser?.restaurant,
       commitSession,
       ensureRemoteScan,
       pollLegacyBackgroundOutputs,
@@ -1147,7 +1430,8 @@ export function PreviewScreen({ route, navigation }: Props) {
   }, [ensureExportPermission, isExporting, isSubmitting, scan]);
 
   const onDownloadModel = React.useCallback(async () => {
-    if (!scan?.outputs?.glbUrl || isSubmitting || isExporting || isDownloadingModel) {
+    const modelUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
+    if (!scan || !modelUrl || isSubmitting || isExporting || isDownloadingModel) {
       return;
     }
 
@@ -1174,12 +1458,10 @@ export function PreviewScreen({ route, navigation }: Props) {
       await RNFS.mkdir(exportDir);
 
       const targetPath = `${exportDir}/model.glb`;
-      const apiKey = getApiKey();
-      const headers = apiKey ? { 'X-API-KEY': apiKey } : undefined;
       const result = await RNFS.downloadFile({
-        fromUrl: scan.outputs.glbUrl,
+        fromUrl: modelUrl,
         toFile: targetPath,
-        headers,
+        headers: scan.outputs?.glbSignedUrl ? undefined : buildDownloadHeaders(),
       }).promise;
 
       if (result.statusCode < 200 || result.statusCode >= 300) {
@@ -1210,6 +1492,10 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
   }, [ensureExportPermission, isDownloadingModel, isExporting, isSubmitting, scan]);
 
+  const selectedDish = useMemo(
+    () => dishes.find(dish => dish.id === scan?.dishId),
+    [dishes, scan?.dishId],
+  );
   const backgroundOutputs = useMemo(
     () =>
       Object.values(scan?.bgOutputs ?? {})
@@ -1217,7 +1503,6 @@ export function PreviewScreen({ route, navigation }: Props) {
         .sort((a, b) => a.slot - b.slot),
     [scan?.bgOutputs],
   );
-
   const backgroundButtonTitle = useMemo(() => {
     if (isExporting) {
       return hasFinalBackgroundOutputs(scan)
@@ -1237,11 +1522,15 @@ export function PreviewScreen({ route, navigation }: Props) {
       ? 'Refresh BG-Removed Images'
       : 'Generate BG-Removed Images';
   }, [isExporting, scan]);
+  const isAuthenticated = Boolean(authUser?.restaurant);
+  const selectedDishName = selectedDish?.name ?? scan?.dishName;
+  const modelDownloadUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
+  const usdzOpenUrl = scan?.outputs?.usdzSignedUrl ?? scan?.outputs?.usdzUrl;
 
   return (
     <Screen
       title="Preview"
-      subtitle={scan ? 'Review your captured images before creating a 3D model.' : 'Scan session not found.'}>
+      subtitle={scan ? 'Review your captured images and attach the scan to a real dish before generating the 3D model.' : 'Scan session not found.'}>
       {!scan ? (
         <AppButton title="Go Home" onPress={() => navigation.navigate('Home')} />
       ) : (
@@ -1258,6 +1547,10 @@ export function PreviewScreen({ route, navigation }: Props) {
               </Text>
             </View>
             <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Dish</Text>
+              <Text style={styles.summaryValue}>{selectedDishName ?? 'Not selected'}</Text>
+            </View>
+            <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Status</Text>
               <Text style={styles.summaryValue}>{scan.status}</Text>
             </View>
@@ -1267,6 +1560,141 @@ export function PreviewScreen({ route, navigation }: Props) {
                 <Text style={styles.summaryValue}>{scan.bgStatus}</Text>
               </View>
             ) : null}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Dish Attachment</Text>
+            <View style={styles.dishCard}>
+              <Text style={styles.label}>Selected Dish</Text>
+              <Text style={styles.selectedDishName}>
+                {selectedDishName ?? 'Choose an existing dish or create one below.'}
+              </Text>
+              <Text style={styles.helper}>
+                The dish appears in website admin immediately. Guests only see it after it is published and a GLB model is ready.
+              </Text>
+
+              {!isAuthenticated ? (
+                <View style={styles.inlineNotice}>
+                  <Text style={styles.inlineNoticeText}>
+                    Log in from Home to load dishes and create new ones.
+                  </Text>
+                </View>
+              ) : null}
+
+              {dishState.kind !== 'idle' ? (
+                <Text
+                  style={[
+                    styles.statusText,
+                    dishState.kind === 'success' ? styles.statusSuccess : styles.statusError,
+                  ]}>
+                  {dishState.message}
+                </Text>
+              ) : null}
+
+              <View style={styles.switchRow}>
+                <View style={styles.switchCopy}>
+                  <Text style={styles.switchLabel}>Publish newly created dish</Text>
+                  <Text style={styles.helper}>
+                    If enabled, the dish status becomes `published`, but it still stays hidden from guests until the model is ready.
+                  </Text>
+                </View>
+                <Switch
+                  value={publishNewDish}
+                  onValueChange={value => {
+                    togglePublishPreference(value).catch(() => undefined);
+                  }}
+                  thumbColor={theme.colors.primaryContrast}
+                  trackColor={{
+                    false: theme.colors.border,
+                    true: theme.colors.primary,
+                  }}
+                  disabled={!isAuthenticated}
+                />
+              </View>
+            </View>
+
+            <View style={styles.dishCard}>
+              <Text style={styles.label}>Create Dish Here</Text>
+              <TextInput
+                value={newDishName}
+                onChangeText={setNewDishName}
+                placeholder="Dish name"
+                placeholderTextColor={theme.colors.textMuted}
+                selectionColor={theme.colors.primary}
+                style={styles.input}
+              />
+              <TextInput
+                value={newDishDescription}
+                onChangeText={setNewDishDescription}
+                placeholder="Description (optional)"
+                placeholderTextColor={theme.colors.textMuted}
+                selectionColor={theme.colors.primary}
+                multiline
+                style={[styles.input, styles.textArea]}
+              />
+              <View style={styles.inlineFields}>
+                <TextInput
+                  value={newDishPrice}
+                  onChangeText={setNewDishPrice}
+                  placeholder="Price"
+                  placeholderTextColor={theme.colors.textMuted}
+                  selectionColor={theme.colors.primary}
+                  keyboardType="decimal-pad"
+                  style={[styles.input, styles.inlineInput]}
+                />
+                <TextInput
+                  value={newDishCategory}
+                  onChangeText={setNewDishCategory}
+                  placeholder="Category"
+                  placeholderTextColor={theme.colors.textMuted}
+                  selectionColor={theme.colors.primary}
+                  style={[styles.input, styles.inlineInput]}
+                />
+              </View>
+              <AppButton
+                title={isCreatingDish ? 'Creating Dish...' : 'Create Dish'}
+                onPress={() => {
+                  createDish().catch(() => undefined);
+                }}
+                disabled={!isAuthenticated || isCreatingDish}
+              />
+            </View>
+
+            <View style={styles.dishCard}>
+              <Text style={styles.label}>Select Existing Dish</Text>
+              {isLoadingDishes ? (
+                <ActivityIndicator color={theme.colors.primary} />
+              ) : dishes.length === 0 ? (
+                <Text style={styles.helper}>
+                  {isAuthenticated
+                    ? 'No dishes found for this restaurant yet.'
+                    : 'Log in to load your restaurant dishes.'}
+                </Text>
+              ) : (
+                <View style={styles.dishList}>
+                  {dishes.map(dish => {
+                    const isSelected = dish.id === scan.dishId;
+                    return (
+                      <Pressable
+                        key={dish.id}
+                        style={[styles.dishRow, isSelected && styles.dishRowSelected]}
+                        onPress={() => {
+                          selectDish(dish).catch(() => undefined);
+                        }}>
+                        <View style={styles.dishRowCopy}>
+                          <Text style={styles.dishRowTitle}>{dish.name}</Text>
+                          <Text style={styles.dishRowMeta}>
+                            {dish.category} • ${dish.price.toFixed(2)} • {dish.status}
+                          </Text>
+                          <Text style={styles.dishRowMeta}>Model: {dish.model_state ?? 'none'}</Text>
+                        </View>
+                        <Text style={styles.dishRowTag}>{isSelected ? 'Selected' : 'Use'}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
           </View>
 
           <View style={styles.thumbGrid}>
@@ -1390,7 +1818,7 @@ export function PreviewScreen({ route, navigation }: Props) {
             </View>
           ) : null}
 
-          {scan.status === 'ready' && scan.outputs?.glbUrl ? (
+          {scan.status === 'ready' && modelDownloadUrl ? (
             <View style={styles.actions}>
               <AppButton
                 title={isDownloadingModel ? 'Downloading GLB...' : 'Download GLB'}
@@ -1404,15 +1832,15 @@ export function PreviewScreen({ route, navigation }: Props) {
                 title="Open GLB"
                 variant="secondary"
                 onPress={() => {
-                  Linking.openURL(scan.outputs!.glbUrl!).catch(() => undefined);
+                  Linking.openURL(modelDownloadUrl).catch(() => undefined);
                 }}
               />
-              {scan.outputs?.usdzUrl ? (
+              {usdzOpenUrl ? (
                 <AppButton
                   title="Open USDZ"
                   variant="secondary"
                   onPress={() => {
-                    Linking.openURL(scan.outputs!.usdzUrl!).catch(() => undefined);
+                    Linking.openURL(usdzOpenUrl).catch(() => undefined);
                   }}
                 />
               ) : null}
@@ -1440,7 +1868,7 @@ export function PreviewScreen({ route, navigation }: Props) {
 
                 runBackgroundRemovalFlow(true).catch(() => undefined);
               }}
-              disabled={isSubmitting || isExporting || scan.images.length === 0}
+              disabled={!isAuthenticated || isSubmitting || isExporting || scan.images.length === 0}
             />
             {hasAnyBackgroundOutputs(scan) || scan.bgStatus ? (
               <AppButton
@@ -1465,16 +1893,18 @@ export function PreviewScreen({ route, navigation }: Props) {
             ) : null}
             <AppButton
               title={
-                isSubmitting
-                  ? scan.status === 'uploading'
-                    ? 'Uploading...'
-                    : 'Creating 3D Model...'
-                  : scan.status === 'error' || scan.status === 'canceled'
-                    ? 'Retry Create 3D Model'
-                    : 'Create 3D Model'
+                !scan.dishId
+                  ? 'Select Dish to Create 3D Model'
+                  : isSubmitting
+                    ? scan.status === 'uploading'
+                      ? 'Uploading...'
+                      : 'Creating 3D Model...'
+                    : scan.status === 'error' || scan.status === 'canceled'
+                      ? 'Retry Create 3D Model'
+                      : 'Create 3D Model'
               }
               onPress={onCreateModel}
-              disabled={isSubmitting || isExporting || scan.images.length === 0}
+              disabled={!isAuthenticated || isSubmitting || isExporting || scan.images.length === 0 || !scan.dishId}
             />
             <AppButton
               title="Discard Scan"
@@ -1524,6 +1954,8 @@ function createStyles(theme: AppTheme) {
       lineHeight: theme.typography.sectionTitle.lineHeight,
       fontWeight: theme.typography.sectionTitle.fontWeight,
       letterSpacing: 0.2,
+      textAlign: 'right',
+      flexShrink: 1,
     },
     section: {
       gap: theme.spacing.md,
@@ -1535,6 +1967,144 @@ function createStyles(theme: AppTheme) {
       lineHeight: 26,
       fontWeight: theme.typography.title.fontWeight,
       letterSpacing: theme.typography.title.letterSpacing,
+    },
+    dishCard: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.md,
+      gap: theme.spacing.sm,
+      ...theme.shadows.card,
+    },
+    label: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    selectedDishName: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.title.fontFamily,
+      fontSize: theme.typography.title.fontSize,
+      lineHeight: theme.typography.title.lineHeight,
+      fontWeight: theme.typography.title.fontWeight,
+      letterSpacing: theme.typography.title.letterSpacing,
+    },
+    helper: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    inlineNotice: {
+      backgroundColor: theme.colors.primarySoft,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      padding: theme.spacing.sm,
+    },
+    inlineNoticeText: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      marginTop: theme.spacing.xs,
+    },
+    switchCopy: {
+      flex: 1,
+      gap: theme.spacing.xs,
+    },
+    switchLabel: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    input: {
+      color: theme.colors.text,
+      backgroundColor: theme.colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      fontFamily: theme.typography.body.fontFamily,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
+      fontWeight: theme.typography.body.fontWeight,
+      letterSpacing: theme.typography.body.letterSpacing,
+    },
+    textArea: {
+      minHeight: 92,
+      textAlignVertical: 'top',
+    },
+    inlineFields: {
+      flexDirection: 'row',
+      gap: theme.spacing.sm,
+    },
+    inlineInput: {
+      flex: 1,
+    },
+    dishList: {
+      gap: theme.spacing.sm,
+    },
+    dishRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.md,
+      backgroundColor: theme.colors.surfaceAlt,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      padding: theme.spacing.md,
+    },
+    dishRowSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    dishRowCopy: {
+      flex: 1,
+      gap: theme.spacing.xxs,
+    },
+    dishRowTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    dishRowMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    dishRowTag: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.label.fontFamily,
+      fontSize: theme.typography.label.fontSize,
+      lineHeight: theme.typography.label.lineHeight,
+      fontWeight: theme.typography.label.fontWeight,
+      letterSpacing: theme.typography.label.letterSpacing,
+      textTransform: theme.typography.label.textTransform,
     },
     progressCard: {
       backgroundColor: theme.colors.surface,
@@ -1675,6 +2245,19 @@ function createStyles(theme: AppTheme) {
     bgRemovedButton: {
       backgroundColor: theme.colors.success,
       borderColor: theme.colors.success,
+    },
+    statusText: {
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: '500',
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    statusSuccess: {
+      color: theme.colors.success,
+    },
+    statusError: {
+      color: theme.colors.danger,
     },
   });
 }

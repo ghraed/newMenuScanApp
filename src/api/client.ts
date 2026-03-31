@@ -1,6 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { ZodSchema } from 'zod';
 import { getApiKey, getApiUrl } from './config';
+import { getAuthToken } from '../storage/authStore';
 
 type ErrorPayload = {
   message?: string;
@@ -14,6 +15,12 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   config.baseURL = getApiUrl();
+
+  const authToken = getAuthToken();
+  if (authToken) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${authToken}`;
+  }
 
   const apiKey = getApiKey();
   if (apiKey) {
@@ -49,7 +56,7 @@ export function toApiError(error: unknown, fallbackMessage: string): Error {
         data?.error ||
         (typeof data === 'string' ? data : undefined) ||
         axiosError.message;
-      const hint = status === 401 ? ' (check API key in Settings)' : '';
+      const hint = status === 401 ? ' (check your login session or API settings)' : '';
       return new Error(
         `${fallbackMessage} (HTTP ${status}${detail ? `: ${detail}` : ''})${hint}`,
       );
