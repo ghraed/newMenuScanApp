@@ -35,6 +35,8 @@ type StatusState =
   | { kind: 'success'; message: string }
   | { kind: 'error'; message: string };
 
+type PreviewLoadState = 'idle' | 'loading' | 'ready' | 'error';
+
 function dishHasReusableModel(dish: MenuDish) {
   return dish.assets.some(asset => asset.asset_type === 'glb');
 }
@@ -107,6 +109,33 @@ function getDishModelFallbackLabel(dish: MenuDish) {
   return trimmedName.slice(0, 2).toUpperCase() || '3D';
 }
 
+function getPreviewStatusLabel(params: {
+  previewUrl?: string;
+  previewSource?: ImageSourcePropType;
+  previewState?: PreviewLoadState;
+}): string {
+  const { previewUrl, previewSource, previewState } = params;
+  const isScanPreview = !previewUrl && Boolean(previewSource);
+
+  if (!previewSource) {
+    return 'No preview found for this model yet';
+  }
+
+  if (previewState === 'loading') {
+    return isScanPreview ? 'Loading scan preview...' : 'Loading preview image...';
+  }
+
+  if (previewState === 'ready') {
+    return isScanPreview ? 'Scan preview ready' : 'Preview image ready';
+  }
+
+  if (previewState === 'error') {
+    return 'Preview could not be loaded';
+  }
+
+  return isScanPreview ? 'Scan preview available' : 'Preview image available';
+}
+
 export function CreateDishScreen({ navigation, route }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -122,6 +151,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
   const [category, setCategory] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>();
   const [previewFallbackDishIds, setPreviewFallbackDishIds] = useState<Set<number>>(() => new Set());
+  const [previewStatesByDishId, setPreviewStatesByDishId] = useState<Record<number, PreviewLoadState>>({});
 
   useFocusEffect(
     React.useCallback(() => {
@@ -153,6 +183,15 @@ export function CreateDishScreen({ navigation, route }: Props) {
 
           const reusableModels = dishes.filter(dishHasReusableModel);
           setModels(reusableModels);
+          setPreviewStatesByDishId(current => {
+            const next: Record<number, PreviewLoadState> = {};
+            reusableModels.forEach(dish => {
+              if (current[dish.id]) {
+                next[dish.id] = current[dish.id];
+              }
+            });
+            return next;
+          });
           setPreviewFallbackDishIds(current => {
             if (current.size === 0) {
               return current;
@@ -416,6 +455,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
                 {models.map(dish => {
                   const previewUrl = getDishModelPreviewUrl(dish);
                   const previewSource = getDishModelPreviewSource(dish, previewFallbackDishIds);
+                  const previewState = previewStatesByDishId[dish.id] ?? 'idle';
                   const isSelected = dish.id === selectedModelId;
 
                   return (
@@ -425,22 +465,46 @@ export function CreateDishScreen({ navigation, route }: Props) {
                       onPress={() => setSelectedModelId(dish.id)}>
                       <View style={styles.modelPreviewFrame}>
                         {previewSource ? (
-                          <Image
-                            source={previewSource}
-                            style={styles.modelPreviewImage}
-                            resizeMode="cover"
-                            onError={() => {
-                              setPreviewFallbackDishIds(current => {
-                                if (current.has(dish.id)) {
-                                  return current;
-                                }
+                          <>
+                            <Image
+                              source={previewSource}
+                              style={styles.modelPreviewImage}
+                              resizeMode="cover"
+                              onLoadStart={() => {
+                                setPreviewStatesByDishId(current => ({
+                                  ...current,
+                                  [dish.id]: 'loading',
+                                }));
+                              }}
+                              onLoad={() => {
+                                setPreviewStatesByDishId(current => ({
+                                  ...current,
+                                  [dish.id]: 'ready',
+                                }));
+                              }}
+                              onError={() => {
+                                setPreviewStatesByDishId(current => ({
+                                  ...current,
+                                  [dish.id]: 'error',
+                                }));
+                                setPreviewFallbackDishIds(current => {
+                                  if (current.has(dish.id)) {
+                                    return current;
+                                  }
 
-                                const next = new Set(current);
-                                next.add(dish.id);
-                                return next;
-                              });
-                            }}
-                          />
+                                  const next = new Set(current);
+                                  next.add(dish.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                            {previewState === 'loading' ? (
+                              <View style={styles.modelPreviewLoadingOverlay}>
+                                <ActivityIndicator size="small" color={theme.colors.primary} />
+                                <Text style={styles.modelPreviewLoadingText}>Loading</Text>
+                              </View>
+                            ) : null}
+                          </>
                         ) : (
                           <View style={styles.modelPreviewFallback}>
                             <Text style={styles.modelPreviewFallbackText}>
@@ -455,11 +519,11 @@ export function CreateDishScreen({ navigation, route }: Props) {
                           {dish.category} • ${dish.price.toFixed(2)} • {dish.status}
                         </Text>
                         <Text style={styles.modelMeta}>
-                          {previewUrl
-                            ? 'Preview image available'
-                            : previewSource
-                              ? 'Using latest scan preview'
-                              : 'No preview image uploaded yet'}
+                          {getPreviewStatusLabel({
+                            previewUrl,
+                            previewSource,
+                            previewState,
+                          })}
                         </Text>
                       </View>
                       <Text style={styles.modelTag}>{isSelected ? 'Selected' : 'Use'}</Text>
@@ -612,6 +676,21 @@ function createStyles(theme: AppTheme) {
     modelPreviewImage: {
       width: '100%',
       height: '100%',
+    },
+    modelPreviewLoadingOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: theme.spacing.xxs,
+      backgroundColor: theme.colors.scrim,
+    },
+    modelPreviewLoadingText: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
     },
     modelPreviewFallback: {
       flex: 1,

@@ -59,7 +59,7 @@ const dishSchema = z.object({
     ])
     .optional(),
   is_model_ready: z.boolean().optional(),
-  latestScan: dishLatestScanSchema,
+  latest_scan: dishLatestScanSchema,
   assets: z.array(dishAssetSchema).default([]),
 });
 
@@ -89,9 +89,10 @@ menuApiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 export type MenuAuthUser = z.infer<typeof authUserSchema>;
 export type MenuLoginResponse = z.infer<typeof loginResponseSchema>;
-export type MenuDish = Omit<MenuDishSchema, 'price' | 'assets'> & {
+export type MenuDish = Omit<MenuDishSchema, 'price' | 'assets' | 'latest_scan'> & {
   price: number;
   assets: NonNullable<MenuDishSchema['assets']>;
+  latestScan?: z.infer<typeof dishLatestScanSchema>;
 };
 export type MenuCreateDishInput = {
   name: string;
@@ -128,10 +129,13 @@ export function resolveMenuAssetUrl(rawUrl?: string | null): string | undefined 
 }
 
 function normalizeDish(dish: MenuDishSchema): MenuDish {
+  const { latest_scan, ...rest } = dish;
+
   return {
-    ...dish,
+    ...rest,
     description: dish.description ?? undefined,
     image_url: dish.image_url ?? undefined,
+    latestScan: latest_scan ?? undefined,
     assets: (dish.assets ?? []).map(asset => ({
       ...asset,
       file_url: resolveMenuAssetUrl(asset.file_url) ?? asset.file_url,
