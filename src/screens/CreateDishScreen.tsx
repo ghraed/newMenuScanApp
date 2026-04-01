@@ -44,6 +44,27 @@ function getDishModelPreviewUrl(dish: MenuDish) {
   );
 }
 
+function getDishModelFallbackLabel(dish: MenuDish) {
+  const trimmedName = dish.name.trim();
+  if (!trimmedName) {
+    return '3D';
+  }
+
+  const initials = trimmedName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(word => word[0] ?? '')
+    .join('')
+    .toUpperCase();
+
+  if (initials) {
+    return initials;
+  }
+
+  return trimmedName.slice(0, 2).toUpperCase() || '3D';
+}
+
 export function CreateDishScreen({ navigation, route }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -311,7 +332,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
               {selectedModel?.name ?? 'Choose a reusable model below.'}
             </Text>
             <Text style={styles.helper}>
-              Only dishes that already have a ready GLB model appear here. The preview image helps you recognize the model quickly.
+              Only dishes that already have a ready GLB model appear here. Some older models do not have preview images yet, so the name card is used as a fallback.
             </Text>
           </View>
 
@@ -339,7 +360,9 @@ export function CreateDishScreen({ navigation, route }: Props) {
                           <Image source={{ uri: previewUrl }} style={styles.modelPreviewImage} resizeMode="cover" />
                         ) : (
                           <View style={styles.modelPreviewFallback}>
-                            <Text style={styles.modelPreviewFallbackText}>3D</Text>
+                            <Text style={styles.modelPreviewFallbackText}>
+                              {getDishModelFallbackLabel(dish)}
+                            </Text>
                           </View>
                         )}
                       </View>
@@ -349,7 +372,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
                           {dish.category} • ${dish.price.toFixed(2)} • {dish.status}
                         </Text>
                         <Text style={styles.modelMeta}>
-                          Preview: {previewUrl ? 'available' : 'missing'}
+                          {previewUrl ? 'Preview image available' : 'No preview image uploaded yet'}
                         </Text>
                       </View>
                       <Text style={styles.modelTag}>{isSelected ? 'Selected' : 'Use'}</Text>

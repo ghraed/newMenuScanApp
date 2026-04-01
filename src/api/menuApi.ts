@@ -100,11 +100,23 @@ export function resolveMenuAssetUrl(rawUrl?: string | null): string | undefined 
     return undefined;
   }
 
+  const baseUrl = getMenuApiBaseUrl();
+
   if (/^https?:\/\//i.test(rawUrl)) {
+    try {
+      const parsedAssetUrl = new URL(rawUrl);
+      const parsedBaseUrl = new URL(baseUrl);
+
+      if (parsedAssetUrl.hostname === parsedBaseUrl.hostname) {
+        return `${parsedBaseUrl.origin}${parsedAssetUrl.pathname}${parsedAssetUrl.search}${parsedAssetUrl.hash}`;
+      }
+    } catch {
+      return rawUrl;
+    }
+
     return rawUrl;
   }
 
-  const baseUrl = getMenuApiBaseUrl();
   const normalizedPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
   return `${baseUrl}${normalizedPath}`;
 }
