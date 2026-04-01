@@ -1,6 +1,6 @@
 import axios, { InternalAxiosRequestConfig } from 'axios';
 import { z } from 'zod';
-import { getMenuApiUrl } from './config';
+import { getMenuApiBaseUrl, getMenuApiUrl } from './config';
 import { parseApiResponse, toApiError } from './client';
 import { getAuthToken } from '../storage/authStore';
 
@@ -95,12 +95,29 @@ export type MenuCreateDishInput = {
   status: 'draft' | 'published';
 };
 
+export function resolveMenuAssetUrl(rawUrl?: string | null): string | undefined {
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  if (/^https?:\/\//i.test(rawUrl)) {
+    return rawUrl;
+  }
+
+  const baseUrl = getMenuApiBaseUrl();
+  const normalizedPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+  return `${baseUrl}${normalizedPath}`;
+}
+
 function normalizeDish(dish: MenuDishSchema): MenuDish {
   return {
     ...dish,
     description: dish.description ?? undefined,
     image_url: dish.image_url ?? undefined,
-    assets: dish.assets ?? [],
+    assets: (dish.assets ?? []).map(asset => ({
+      ...asset,
+      file_url: resolveMenuAssetUrl(asset.file_url) ?? asset.file_url,
+    })),
     price:
       typeof dish.price === 'number'
         ? dish.price
@@ -177,5 +194,20 @@ export async function menuCreateDish(input: MenuCreateDishInput): Promise<MenuDi
     return normalizeDish(dishSchema.parse(response.data));
   } catch (error) {
     throw toApiError(error, 'Failed to create dish');
+  }
+}
+
+export async function menuCopyDishModel(
+  targetDishId: number,
+  sourceDishId: number,
+): Promise<MenuDish> {
+  try {
+    const response = await menuApiClient.post(`/dishes/${targetDishId}/copy-model`, {
+      source_dish_id: sourceDishId,
+    });
+
+    return normalizeDish(dishSchema.parse(response.data));
+  } catch (error) {
+    throw toApiError(error, 'Failed to copy existing 3D model');
   }
 }

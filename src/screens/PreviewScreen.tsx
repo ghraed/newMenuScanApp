@@ -30,7 +30,7 @@ import {
   buildRgbaUrl,
 } from '../api/scansApi';
 import { getApiKey } from '../api/config';
-import { menuCreateDish, menuListDishes, MenuDish } from '../api/menuApi';
+import { menuCopyDishModel, menuCreateDish, menuListDishes, MenuDish } from '../api/menuApi';
 import {
   cropFileToSelectionInPlace,
   getSelectionUploadUri,
@@ -185,6 +185,18 @@ function buildDownloadHeaders() {
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
+function dishHasReusableModel(dish: MenuDish) {
+  return dish.assets.some(asset => asset.asset_type === 'glb');
+}
+
+function getDishModelPreviewUrl(dish: MenuDish) {
+  return (
+    dish.assets.find(asset => asset.asset_type === 'preview_image')?.file_url ??
+    dish.image_url ??
+    undefined
+  );
+}
+
 export function PreviewScreen({ route, navigation }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -194,6 +206,7 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [dishes, setDishes] = useState<MenuDish[]>([]);
   const [isLoadingDishes, setIsLoadingDishes] = useState(false);
   const [isCreatingDish, setIsCreatingDish] = useState(false);
+  const [isCopyingModel, setIsCopyingModel] = useState(false);
   const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
   const [newDishName, setNewDishName] = useState('');
   const [newDishDescription, setNewDishDescription] = useState('');
@@ -254,26 +267,58 @@ export function PreviewScreen({ route, navigation }: Props) {
           const selectedDish = nextScan.dishId
             ? loadedDishes.find(dish => dish.id === nextScan.dishId)
             : undefined;
+          const selectedModelSource = nextScan.modelSourceDishId
+            ? loadedDishes.find(dish => dish.id === nextScan.modelSourceDishId)
+            : undefined;
+          let nextSession = nextScan;
+          let shouldPersist = false;
 
           if (
             selectedDish &&
             (nextScan.dishName !== selectedDish.name ||
               nextScan.restaurantId !== nextAuthUser.restaurant.id)
           ) {
-            await upsertScanSession({
-              ...nextScan,
+            nextSession = {
+              ...nextSession,
               restaurantId: nextAuthUser.restaurant.id,
               dishId: selectedDish.id,
               dishName: selectedDish.name,
-            });
-            if (isActive) {
-              setScan(getScanSession(scanId));
-            }
+            };
+            shouldPersist = true;
           } else if (!nextScan.restaurantId) {
-            await upsertScanSession({
-              ...nextScan,
+            nextSession = {
+              ...nextSession,
               restaurantId: nextAuthUser.restaurant.id,
-            });
+            };
+            shouldPersist = true;
+          }
+
+          if (
+            selectedModelSource &&
+            (nextSession.modelSourceDishName !== selectedModelSource.name ||
+              !dishHasReusableModel(selectedModelSource))
+          ) {
+            nextSession = {
+              ...nextSession,
+              modelSourceDishId: dishHasReusableModel(selectedModelSource)
+                ? selectedModelSource.id
+                : undefined,
+              modelSourceDishName: dishHasReusableModel(selectedModelSource)
+                ? selectedModelSource.name
+                : undefined,
+            };
+            shouldPersist = true;
+          } else if (nextSession.modelSourceDishId && !selectedModelSource) {
+            nextSession = {
+              ...nextSession,
+              modelSourceDishId: undefined,
+              modelSourceDishName: undefined,
+            };
+            shouldPersist = true;
+          }
+
+          if (shouldPersist) {
+            await upsertScanSession(nextSession);
             if (isActive) {
               setScan(getScanSession(scanId));
             }
@@ -730,24 +775,92 @@ export function PreviewScreen({ route, navigation }: Props) {
     [commitSession, downloadBackgroundSlot],
   );
 
-  const selectDish = React.useCallback(
+  const selectTargetDish = React.useCallback(
     async (dish: MenuDish) => {
       const latest = getScanSession(scanId) ?? scan;
       if (!latest) {
         return;
       }
 
+      const keepModelSelection = latest.dishId === dish.id;
+
       const next = await commitSession({
         ...latest,
         restaurantId: authUser?.restaurant?.id ?? latest.restaurantId,
         dishId: dish.id,
         dishName: dish.name,
+        modelSourceDishId: keepModelSelection ? latest.modelSourceDishId : undefined,
+        modelSourceDishName: keepModelSelection ? latest.modelSourceDishName : undefined,
       });
 
       setScan(next);
-      setDishState({ kind: 'success', message: `Dish selected: ${dish.name}` });
+      setDishState({ kind: 'success', message: `Target dish selected: ${dish.name}` });
     },
     [authUser?.restaurant?.id, commitSession, scan, scanId],
+  );
+
+  const applyExistingModel = React.useCallback(
+    async (sourceDish: MenuDish) => {
+      const latest = getScanSession(scanId) ?? scan;
+      if (!latest) {
+        return;
+      }
+
+      if (!authUser?.restaurant) {
+        setDishState({
+          kind: 'error',
+          message: 'Log in from Home before applying an existing 3D model.',
+        });
+        return;
+      }
+
+      if (!latest.dishId) {
+        setDishState({
+          kind: 'error',
+          message: 'Choose or create the target dish before selecting an existing 3D model.',
+        });
+        return;
+      }
+
+      if (latest.dishId === sourceDish.id) {
+        setDishState({
+          kind: 'error',
+          message: 'The target dish already owns this model. Pick a different reusable model.',
+        });
+        return;
+      }
+
+      try {
+        setIsCopyingModel(true);
+        setDishState({ kind: 'idle' });
+
+        const updatedDish = await menuCopyDishModel(latest.dishId, sourceDish.id);
+        const next = await commitSession({
+          ...latest,
+          dishId: updatedDish.id,
+          dishName: updatedDish.name,
+          modelSourceDishId: sourceDish.id,
+          modelSourceDishName: sourceDish.name,
+        });
+
+        setDishes(current =>
+          current.map(dish => (dish.id === updatedDish.id ? updatedDish : dish)),
+        );
+        setScan(next);
+        setDishState({
+          kind: 'success',
+          message: `Copied the 3D model from ${sourceDish.name} to ${updatedDish.name}.`,
+        });
+      } catch (error) {
+        setDishState({
+          kind: 'error',
+          message: error instanceof Error ? error.message : 'Could not apply the selected 3D model.',
+        });
+      } finally {
+        setIsCopyingModel(false);
+      }
+    },
+    [authUser?.restaurant, commitSession, scan, scanId],
   );
 
   const togglePublishPreference = React.useCallback(
@@ -807,7 +920,7 @@ export function PreviewScreen({ route, navigation }: Props) {
       });
 
       setDishes(current => [createdDish, ...current.filter(dish => dish.id !== createdDish.id)]);
-      await selectDish(createdDish);
+      await selectTargetDish(createdDish);
       setNewDishName('');
       setNewDishDescription('');
       setNewDishPrice('');
@@ -833,7 +946,7 @@ export function PreviewScreen({ route, navigation }: Props) {
     newDishName,
     newDishPrice,
     publishNewDish,
-    selectDish,
+    selectTargetDish,
   ]);
 
   const ensureDishAttached = React.useCallback(
@@ -877,7 +990,7 @@ export function PreviewScreen({ route, navigation }: Props) {
     if (!latest.dishId) {
       Alert.alert(
         'Dish Required',
-        'Select an existing dish or create a new one before generating the 3D model.',
+        'Select or create the target dish before generating the 3D model.',
       );
       return;
     }
@@ -1492,9 +1605,21 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
   }, [ensureExportPermission, isDownloadingModel, isExporting, isSubmitting, scan]);
 
-  const selectedDish = useMemo(
+  const selectedTargetDish = useMemo(
     () => dishes.find(dish => dish.id === scan?.dishId),
     [dishes, scan?.dishId],
+  );
+  const reusableModelDishes = useMemo(
+    () => dishes.filter(dishHasReusableModel),
+    [dishes],
+  );
+  const availableSourceModels = useMemo(
+    () => reusableModelDishes.filter(dish => dish.id !== scan?.dishId),
+    [reusableModelDishes, scan?.dishId],
+  );
+  const selectedSourceModel = useMemo(
+    () => dishes.find(dish => dish.id === scan?.modelSourceDishId),
+    [dishes, scan?.modelSourceDishId],
   );
   const backgroundOutputs = useMemo(
     () =>
@@ -1523,14 +1648,19 @@ export function PreviewScreen({ route, navigation }: Props) {
       : 'Generate BG-Removed Images';
   }, [isExporting, scan]);
   const isAuthenticated = Boolean(authUser?.restaurant);
-  const selectedDishName = selectedDish?.name ?? scan?.dishName;
+  const selectedDishName = selectedTargetDish?.name ?? scan?.dishName;
+  const selectedSourceModelName = selectedSourceModel?.name ?? scan?.modelSourceDishName;
   const modelDownloadUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
   const usdzOpenUrl = scan?.outputs?.usdzSignedUrl ?? scan?.outputs?.usdzUrl;
 
   return (
     <Screen
       title="Preview"
-      subtitle={scan ? 'Review your captured images and attach the scan to a real dish before generating the 3D model.' : 'Scan session not found.'}>
+      subtitle={
+        scan
+          ? 'Review your captured images, choose the target dish, and optionally reuse an existing 3D model before generating a new one.'
+          : 'Scan session not found.'
+      }>
       {!scan ? (
         <AppButton title="Go Home" onPress={() => navigation.navigate('Home')} />
       ) : (
@@ -1547,7 +1677,7 @@ export function PreviewScreen({ route, navigation }: Props) {
               </Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Dish</Text>
+              <Text style={styles.summaryLabel}>Target Dish</Text>
               <Text style={styles.summaryValue}>{selectedDishName ?? 'Not selected'}</Text>
             </View>
             <View style={styles.summaryRow}>
@@ -1563,20 +1693,27 @@ export function PreviewScreen({ route, navigation }: Props) {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Dish Attachment</Text>
+            <Text style={styles.sectionTitle}>Target Dish & Model</Text>
             <View style={styles.dishCard}>
-              <Text style={styles.label}>Selected Dish</Text>
+              <Text style={styles.label}>Selected Target Dish</Text>
               <Text style={styles.selectedDishName}>
                 {selectedDishName ?? 'Choose an existing dish or create one below.'}
               </Text>
               <Text style={styles.helper}>
-                The dish appears in website admin immediately. Guests only see it after it is published and a GLB model is ready.
+                This is the dish that will receive the generated 3D model. It appears in website admin immediately, but guests only see it after it is published and a GLB model is ready.
+              </Text>
+              <Text style={styles.label}>Selected Reusable 3D Model</Text>
+              <Text style={styles.selectedDishName}>
+                {selectedSourceModelName ?? 'None selected yet.'}
+              </Text>
+              <Text style={styles.helper}>
+                Picking an existing 3D model copies its GLB, USDZ, and preview image onto the selected target dish.
               </Text>
 
               {!isAuthenticated ? (
                 <View style={styles.inlineNotice}>
                   <Text style={styles.inlineNoticeText}>
-                    Log in from Home to load dishes and create new ones.
+                    Log in from Home to load your dishes and reusable 3D models.
                   </Text>
                 </View>
               ) : null}
@@ -1661,7 +1798,7 @@ export function PreviewScreen({ route, navigation }: Props) {
             </View>
 
             <View style={styles.dishCard}>
-              <Text style={styles.label}>Select Existing Dish</Text>
+              <Text style={styles.label}>Use Existing Dish As Target</Text>
               {isLoadingDishes ? (
                 <ActivityIndicator color={theme.colors.primary} />
               ) : dishes.length === 0 ? (
@@ -1679,7 +1816,7 @@ export function PreviewScreen({ route, navigation }: Props) {
                         key={dish.id}
                         style={[styles.dishRow, isSelected && styles.dishRowSelected]}
                         onPress={() => {
-                          selectDish(dish).catch(() => undefined);
+                          selectTargetDish(dish).catch(() => undefined);
                         }}>
                         <View style={styles.dishRowCopy}>
                           <Text style={styles.dishRowTitle}>{dish.name}</Text>
@@ -1688,7 +1825,68 @@ export function PreviewScreen({ route, navigation }: Props) {
                           </Text>
                           <Text style={styles.dishRowMeta}>Model: {dish.model_state ?? 'none'}</Text>
                         </View>
-                        <Text style={styles.dishRowTag}>{isSelected ? 'Selected' : 'Use'}</Text>
+                        <Text style={styles.dishRowTag}>{isSelected ? 'Target' : 'Use'}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.dishCard}>
+              <Text style={styles.label}>Choose Existing 3D Model</Text>
+              {!scan.dishId ? (
+                <Text style={styles.helper}>
+                  Create or choose the target dish first, then apply one of your ready 3D models to it.
+                </Text>
+              ) : null}
+              {isLoadingDishes ? (
+                <ActivityIndicator color={theme.colors.primary} />
+              ) : availableSourceModels.length === 0 ? (
+                <Text style={styles.helper}>
+                  {isAuthenticated
+                    ? 'No reusable 3D models are ready yet. Generate one first, then it will appear here with its preview image.'
+                    : 'Log in to load your reusable 3D models.'}
+                </Text>
+              ) : (
+                <View style={styles.dishList}>
+                  {availableSourceModels.map(dish => {
+                    const isSelected = dish.id === scan.modelSourceDishId;
+                    const previewUrl = getDishModelPreviewUrl(dish);
+
+                    return (
+                      <Pressable
+                        key={`model_${dish.id}`}
+                        style={[styles.dishRow, isSelected && styles.dishRowSelected]}
+                        onPress={() => {
+                          applyExistingModel(dish).catch(() => undefined);
+                        }}
+                        disabled={isCopyingModel}>
+                        <View style={styles.modelPreviewFrame}>
+                          {previewUrl ? (
+                            <Image
+                              source={{ uri: previewUrl }}
+                              style={styles.modelPreviewImage}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <View style={styles.modelPreviewFallback}>
+                              <Text style={styles.modelPreviewFallbackText}>3D</Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={styles.dishRowCopy}>
+                          <Text style={styles.dishRowTitle}>{dish.name}</Text>
+                          <Text style={styles.dishRowMeta}>
+                            {dish.category} • ${dish.price.toFixed(2)}
+                          </Text>
+                          <Text style={styles.dishRowMeta}>
+                            Preview: {previewUrl ? 'available' : 'missing'} • Status: {dish.model_state ?? 'ready'}
+                          </Text>
+                        </View>
+                        <Text style={styles.dishRowTag}>
+                          {isCopyingModel && isSelected ? 'Applying' : isSelected ? 'Applied' : 'Apply'}
+                        </Text>
                       </Pressable>
                     );
                   })}
@@ -1894,7 +2092,7 @@ export function PreviewScreen({ route, navigation }: Props) {
             <AppButton
               title={
                 !scan.dishId
-                  ? 'Select Dish to Create 3D Model'
+                  ? 'Select Target Dish to Create 3D Model'
                   : isSubmitting
                     ? scan.status === 'uploading'
                       ? 'Uploading...'
@@ -2080,6 +2278,37 @@ function createStyles(theme: AppTheme) {
     dishRowCopy: {
       flex: 1,
       gap: theme.spacing.xxs,
+    },
+    modelPreviewFrame: {
+      width: 72,
+      height: 72,
+      borderRadius: theme.radius.md,
+      overflow: 'hidden',
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modelPreviewImage: {
+      width: '100%',
+      height: '100%',
+    },
+    modelPreviewFallback: {
+      flex: 1,
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.primarySoft,
+    },
+    modelPreviewFallbackText: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.label.fontFamily,
+      fontSize: theme.typography.label.fontSize,
+      lineHeight: theme.typography.label.lineHeight,
+      fontWeight: theme.typography.label.fontWeight,
+      letterSpacing: theme.typography.label.letterSpacing,
+      textTransform: theme.typography.label.textTransform,
     },
     dishRowTitle: {
       color: theme.colors.text,

@@ -66,6 +66,8 @@ export type ScanSession = {
   restaurantId?: number;
   dishId?: number;
   dishName?: string;
+  modelSourceDishId?: number;
+  modelSourceDishName?: string;
   publishOnCreate?: boolean;
   targetType: ScanTargetType;
   captureMode: ScanCaptureMode;
