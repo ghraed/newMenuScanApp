@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -267,6 +268,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
 
   return (
     <Screen
+      scroll={false}
       title="Create Dish"
       subtitle={
         scanId
@@ -282,70 +284,79 @@ export function CreateDishScreen({ navigation, route }: Props) {
           <AppButton title="Go Home" onPress={() => navigation.navigate('Home')} />
         </View>
       ) : (
-        <>
-          <View style={styles.card}>
-            <Text style={styles.label}>New Dish Details</Text>
-            <Text style={styles.helper}>
-              This flow creates the dish as draft, copies the selected existing 3D model, then publishes the final dish so it becomes guest-visible.
-            </Text>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="Dish name"
-              placeholderTextColor={theme.colors.textMuted}
-              selectionColor={theme.colors.primary}
-              style={styles.input}
-            />
-            <TextInput
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Description (optional)"
-              placeholderTextColor={theme.colors.textMuted}
-              selectionColor={theme.colors.primary}
-              multiline
-              style={[styles.input, styles.textArea]}
-            />
-            <View style={styles.inlineFields}>
+        <View style={styles.layout}>
+          <View style={styles.topSection}>
+            <View style={styles.card}>
+              <Text style={styles.label}>New Dish Details</Text>
+              <Text style={styles.helper}>
+                This flow creates the dish as draft, copies the selected existing 3D model, then publishes the final dish so it becomes guest-visible.
+              </Text>
               <TextInput
-                value={price}
-                onChangeText={setPrice}
-                placeholder="Price"
+                value={name}
+                onChangeText={setName}
+                placeholder="Dish name"
                 placeholderTextColor={theme.colors.textMuted}
                 selectionColor={theme.colors.primary}
-                keyboardType="decimal-pad"
-                style={[styles.input, styles.inlineInput]}
+                style={styles.input}
               />
               <TextInput
-                value={category}
-                onChangeText={setCategory}
-                placeholder="Category"
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Description (optional)"
                 placeholderTextColor={theme.colors.textMuted}
                 selectionColor={theme.colors.primary}
-                style={[styles.input, styles.inlineInput]}
+                multiline
+                style={[styles.input, styles.textArea]}
               />
+              <View style={styles.inlineFields}>
+                <TextInput
+                  value={price}
+                  onChangeText={setPrice}
+                  placeholder="Price"
+                  placeholderTextColor={theme.colors.textMuted}
+                  selectionColor={theme.colors.primary}
+                  keyboardType="decimal-pad"
+                  style={[styles.input, styles.inlineInput]}
+                />
+                <TextInput
+                  value={category}
+                  onChangeText={setCategory}
+                  placeholder="Category"
+                  placeholderTextColor={theme.colors.textMuted}
+                  selectionColor={theme.colors.primary}
+                  style={[styles.input, styles.inlineInput]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.label}>Selected Existing 3D Model</Text>
+              <Text style={styles.selectedModelName}>
+                {selectedModel?.name ?? 'Choose a reusable model below.'}
+              </Text>
+              <Text style={styles.helper}>
+                Models only show a real thumbnail when that dish already has a preview image. Older models without one will show a name fallback instead.
+              </Text>
             </View>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>Selected Existing 3D Model</Text>
-            <Text style={styles.selectedModelName}>
-              {selectedModel?.name ?? 'Choose a reusable model below.'}
-            </Text>
-            <Text style={styles.helper}>
-              Only dishes that already have a ready GLB model appear here. Some older models do not have preview images yet, so the name card is used as a fallback.
-            </Text>
-          </View>
-
-          <View style={styles.card}>
+          <View style={[styles.card, styles.modelsCard]}>
             <Text style={styles.label}>Reusable Models</Text>
             {isLoadingModels ? (
-              <ActivityIndicator color={theme.colors.primary} />
+              <View style={styles.modelsEmptyState}>
+                <ActivityIndicator color={theme.colors.primary} />
+              </View>
             ) : models.length === 0 ? (
-              <Text style={styles.helper}>
-                No reusable 3D models are ready yet. Generate one first, then it will appear here.
-              </Text>
+              <View style={styles.modelsEmptyState}>
+                <Text style={styles.helper}>
+                  No reusable 3D models are ready yet. Generate one first, then it will appear here.
+                </Text>
+              </View>
             ) : (
-              <View style={styles.modelList}>
+              <ScrollView
+                style={styles.modelListScroll}
+                contentContainerStyle={styles.modelList}
+                showsVerticalScrollIndicator={false}>
                 {models.map(dish => {
                   const previewUrl = getDishModelPreviewUrl(dish);
                   const isSelected = dish.id === selectedModelId;
@@ -379,9 +390,19 @@ export function CreateDishScreen({ navigation, route }: Props) {
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             )}
           </View>
+
+          {statusState.kind !== 'idle' ? (
+            <Text
+              style={[
+                styles.statusText,
+                statusState.kind === 'success' ? styles.statusSuccess : styles.statusError,
+              ]}>
+              {statusState.message}
+            </Text>
+          ) : null}
 
           <View style={styles.actions}>
             <AppButton
@@ -400,24 +421,22 @@ export function CreateDishScreen({ navigation, route }: Props) {
               />
             ) : null}
           </View>
-        </>
+        </View>
       )}
-
-      {statusState.kind !== 'idle' ? (
-        <Text
-          style={[
-            styles.statusText,
-            statusState.kind === 'success' ? styles.statusSuccess : styles.statusError,
-          ]}>
-          {statusState.message}
-        </Text>
-      ) : null}
     </Screen>
   );
 }
 
 function createStyles(theme: AppTheme) {
   return StyleSheet.create({
+    layout: {
+      flex: 1,
+      gap: theme.spacing.lg,
+      paddingBottom: theme.spacing.md,
+    },
+    topSection: {
+      gap: theme.spacing.lg,
+    },
     card: {
       backgroundColor: theme.colors.surface,
       borderRadius: theme.radius.lg,
@@ -478,6 +497,18 @@ function createStyles(theme: AppTheme) {
     },
     modelList: {
       gap: theme.spacing.sm,
+      paddingBottom: theme.spacing.xs,
+    },
+    modelListScroll: {
+      flex: 1,
+    },
+    modelsCard: {
+      flex: 1,
+      minHeight: 240,
+    },
+    modelsEmptyState: {
+      flex: 1,
+      justifyContent: 'center',
     },
     modelRow: {
       flexDirection: 'row',
@@ -562,6 +593,7 @@ function createStyles(theme: AppTheme) {
       lineHeight: theme.typography.body.lineHeight,
       fontWeight: theme.typography.body.fontWeight,
       letterSpacing: theme.typography.body.letterSpacing,
+      paddingHorizontal: theme.spacing.xs,
     },
     statusSuccess: {
       color: theme.colors.success,
