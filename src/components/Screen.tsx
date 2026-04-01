@@ -41,7 +41,9 @@ export function Screen({ title, subtitle, children, scroll = true }: Props) {
         {scroll ? (
           <ScrollView
             contentContainerStyle={styles.scroll}
-            showsVerticalScrollIndicator={false}>
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled>
             {content}
           </ScrollView>
         ) : (

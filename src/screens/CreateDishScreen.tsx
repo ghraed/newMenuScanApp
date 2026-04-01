@@ -268,7 +268,6 @@ export function CreateDishScreen({ navigation, route }: Props) {
 
   return (
     <Screen
-      scroll={false}
       title="Create Dish"
       subtitle={
         scanId
@@ -356,7 +355,9 @@ export function CreateDishScreen({ navigation, route }: Props) {
               <ScrollView
                 style={styles.modelListScroll}
                 contentContainerStyle={styles.modelList}
-                showsVerticalScrollIndicator={false}>
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled>
                 {models.map(dish => {
                   const previewUrl = getDishModelPreviewUrl(dish);
                   const isSelected = dish.id === selectedModelId;
@@ -430,7 +431,6 @@ export function CreateDishScreen({ navigation, route }: Props) {
 function createStyles(theme: AppTheme) {
   return StyleSheet.create({
     layout: {
-      flex: 1,
       gap: theme.spacing.lg,
       paddingBottom: theme.spacing.md,
     },
@@ -500,14 +500,13 @@ function createStyles(theme: AppTheme) {
       paddingBottom: theme.spacing.xs,
     },
     modelListScroll: {
-      flex: 1,
+      maxHeight: 320,
     },
     modelsCard: {
-      flex: 1,
       minHeight: 240,
     },
     modelsEmptyState: {
-      flex: 1,
+      minHeight: 160,
       justifyContent: 'center',
     },
     modelRow: {
