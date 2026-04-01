@@ -36,6 +36,11 @@ const dishAssetSchema = z.object({
   file_url: z.string().optional().nullable(),
 });
 
+const dishLatestScanSchema = z.object({
+  id: z.string().min(1),
+  status: z.string().optional(),
+}).nullable().optional();
+
 const dishSchema = z.object({
   id: z.number().int().positive(),
   uuid: z.string(),
@@ -54,6 +59,7 @@ const dishSchema = z.object({
     ])
     .optional(),
   is_model_ready: z.boolean().optional(),
+  latestScan: dishLatestScanSchema,
   assets: z.array(dishAssetSchema).default([]),
 });
 

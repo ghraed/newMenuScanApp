@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  ImageSourcePropType,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,8 +22,9 @@ import {
   menuPublishDish,
   MenuDish,
 } from '../api/menuApi';
+import { getApiBaseUrl, getApiKey } from '../api/config';
 import { AppTheme, useAppTheme } from '../lib/theme';
-import { getAuthUser } from '../storage/authStore';
+import { getAuthToken, getAuthUser } from '../storage/authStore';
 import { getScanSession, upsertScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
 
@@ -43,6 +45,45 @@ function getDishModelPreviewUrl(dish: MenuDish) {
     dish.image_url ??
     undefined
   );
+}
+
+function buildProtectedPreviewHeaders() {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  const apiKey = getApiKey();
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (apiKey) {
+    headers['X-API-KEY'] = apiKey;
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+function getDishModelPreviewSource(
+  dish: MenuDish,
+  blockedDishIds: Set<number>,
+): ImageSourcePropType | undefined {
+  if (blockedDishIds.has(dish.id)) {
+    return undefined;
+  }
+
+  const directPreviewUrl = getDishModelPreviewUrl(dish);
+  if (directPreviewUrl) {
+    return { uri: directPreviewUrl };
+  }
+
+  if (!dish.latestScan?.id) {
+    return undefined;
+  }
+
+  const headers = buildProtectedPreviewHeaders();
+  const uri = `${getApiBaseUrl()}/api/files/${dish.latestScan.id}/preview`;
+
+  return headers ? { uri, headers } : { uri };
 }
 
 function getDishModelFallbackLabel(dish: MenuDish) {
@@ -80,6 +121,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
   const [price, setPrice] = useState('');
   const [category, setCategory] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>();
+  const [previewFallbackDishIds, setPreviewFallbackDishIds] = useState<Set<number>>(() => new Set());
 
   useFocusEffect(
     React.useCallback(() => {
@@ -111,6 +153,19 @@ export function CreateDishScreen({ navigation, route }: Props) {
 
           const reusableModels = dishes.filter(dishHasReusableModel);
           setModels(reusableModels);
+          setPreviewFallbackDishIds(current => {
+            if (current.size === 0) {
+              return current;
+            }
+
+            const next = new Set<number>();
+            reusableModels.forEach(dish => {
+              if (current.has(dish.id)) {
+                next.add(dish.id);
+              }
+            });
+            return next;
+          });
 
           if (
             selectedModelId &&
@@ -360,6 +415,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
                 nestedScrollEnabled>
                 {models.map(dish => {
                   const previewUrl = getDishModelPreviewUrl(dish);
+                  const previewSource = getDishModelPreviewSource(dish, previewFallbackDishIds);
                   const isSelected = dish.id === selectedModelId;
 
                   return (
@@ -368,8 +424,23 @@ export function CreateDishScreen({ navigation, route }: Props) {
                       style={[styles.modelRow, isSelected && styles.modelRowSelected]}
                       onPress={() => setSelectedModelId(dish.id)}>
                       <View style={styles.modelPreviewFrame}>
-                        {previewUrl ? (
-                          <Image source={{ uri: previewUrl }} style={styles.modelPreviewImage} resizeMode="cover" />
+                        {previewSource ? (
+                          <Image
+                            source={previewSource}
+                            style={styles.modelPreviewImage}
+                            resizeMode="cover"
+                            onError={() => {
+                              setPreviewFallbackDishIds(current => {
+                                if (current.has(dish.id)) {
+                                  return current;
+                                }
+
+                                const next = new Set(current);
+                                next.add(dish.id);
+                                return next;
+                              });
+                            }}
+                          />
                         ) : (
                           <View style={styles.modelPreviewFallback}>
                             <Text style={styles.modelPreviewFallbackText}>
@@ -384,7 +455,11 @@ export function CreateDishScreen({ navigation, route }: Props) {
                           {dish.category} • ${dish.price.toFixed(2)} • {dish.status}
                         </Text>
                         <Text style={styles.modelMeta}>
-                          {previewUrl ? 'Preview image available' : 'No preview image uploaded yet'}
+                          {previewUrl
+                            ? 'Preview image available'
+                            : previewSource
+                              ? 'Using latest scan preview'
+                              : 'No preview image uploaded yet'}
                         </Text>
                       </View>
                       <Text style={styles.modelTag}>{isSelected ? 'Selected' : 'Use'}</Text>
