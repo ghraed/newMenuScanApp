@@ -211,3 +211,12 @@ export async function menuCopyDishModel(
     throw toApiError(error, 'Failed to copy existing 3D model');
   }
 }
+
+export async function menuPublishDish(dishId: number): Promise<MenuDish> {
+  try {
+    const response = await menuApiClient.patch(`/dishes/${dishId}/publish`);
+    return normalizeDish(dishSchema.parse(response.data));
+  } catch (error) {
+    throw toApiError(error, 'Failed to publish dish');
+  }
+}

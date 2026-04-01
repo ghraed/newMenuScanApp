@@ -7,6 +7,7 @@ import { PreviewScreen } from '../screens/PreviewScreen';
 import { ScanScreen } from '../screens/ScanScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { SetupScreen } from '../screens/SetupScreen';
+import { CreateDishScreen } from '../screens/CreateDishScreen';
 import { AppTheme, useAppTheme } from '../lib/theme';
 import { RootStackParamList } from '../types/navigation';
 
@@ -42,6 +43,7 @@ export function RootNavigator() {
       }}>
       <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Menu App Scanner' }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <Stack.Screen name="CreateDish" component={CreateDishScreen} options={{ title: 'Create Dish' }} />
       <Stack.Screen name="Setup" component={SetupScreen} options={{ title: 'Setup Scan' }} />
       <Stack.Screen name="Scan" component={ScanScreen} options={{ title: 'Scan' }} />
       <Stack.Screen name="Preview" component={PreviewScreen} options={{ title: 'Preview' }} />

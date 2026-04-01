@@ -1697,17 +1697,17 @@ export function PreviewScreen({ route, navigation }: Props) {
             <View style={styles.dishCard}>
               <Text style={styles.label}>Selected Target Dish</Text>
               <Text style={styles.selectedDishName}>
-                {selectedDishName ?? 'Choose an existing dish or create one below.'}
+                {selectedDishName ?? 'Choose an existing dish here or open the dish builder.'}
               </Text>
               <Text style={styles.helper}>
-                This is the dish that will receive the generated 3D model. It appears in website admin immediately, but guests only see it after it is published and a GLB model is ready.
+                This is the dish that will receive the generated 3D model from the scan pipeline.
               </Text>
               <Text style={styles.label}>Selected Reusable 3D Model</Text>
               <Text style={styles.selectedDishName}>
                 {selectedSourceModelName ?? 'None selected yet.'}
               </Text>
               <Text style={styles.helper}>
-                Picking an existing 3D model copies its GLB, USDZ, and preview image onto the selected target dish.
+                Creating a brand-new published dish and assigning an existing model has moved to a separate page.
               </Text>
 
               {!isAuthenticated ? (
@@ -1727,73 +1727,12 @@ export function PreviewScreen({ route, navigation }: Props) {
                   {dishState.message}
                 </Text>
               ) : null}
-
-              <View style={styles.switchRow}>
-                <View style={styles.switchCopy}>
-                  <Text style={styles.switchLabel}>Publish newly created dish</Text>
-                  <Text style={styles.helper}>
-                    If enabled, the dish status becomes `published`, but it still stays hidden from guests until the model is ready.
-                  </Text>
-                </View>
-                <Switch
-                  value={publishNewDish}
-                  onValueChange={value => {
-                    togglePublishPreference(value).catch(() => undefined);
-                  }}
-                  thumbColor={theme.colors.primaryContrast}
-                  trackColor={{
-                    false: theme.colors.border,
-                    true: theme.colors.primary,
-                  }}
-                  disabled={!isAuthenticated}
-                />
-              </View>
-            </View>
-
-            <View style={styles.dishCard}>
-              <Text style={styles.label}>Create Dish Here</Text>
-              <TextInput
-                value={newDishName}
-                onChangeText={setNewDishName}
-                placeholder="Dish name"
-                placeholderTextColor={theme.colors.textMuted}
-                selectionColor={theme.colors.primary}
-                style={styles.input}
-              />
-              <TextInput
-                value={newDishDescription}
-                onChangeText={setNewDishDescription}
-                placeholder="Description (optional)"
-                placeholderTextColor={theme.colors.textMuted}
-                selectionColor={theme.colors.primary}
-                multiline
-                style={[styles.input, styles.textArea]}
-              />
-              <View style={styles.inlineFields}>
-                <TextInput
-                  value={newDishPrice}
-                  onChangeText={setNewDishPrice}
-                  placeholder="Price"
-                  placeholderTextColor={theme.colors.textMuted}
-                  selectionColor={theme.colors.primary}
-                  keyboardType="decimal-pad"
-                  style={[styles.input, styles.inlineInput]}
-                />
-                <TextInput
-                  value={newDishCategory}
-                  onChangeText={setNewDishCategory}
-                  placeholder="Category"
-                  placeholderTextColor={theme.colors.textMuted}
-                  selectionColor={theme.colors.primary}
-                  style={[styles.input, styles.inlineInput]}
-                />
-              </View>
               <AppButton
-                title={isCreatingDish ? 'Creating Dish...' : 'Create Dish'}
+                title="Open Dish Builder"
                 onPress={() => {
-                  createDish().catch(() => undefined);
+                  navigation.navigate('CreateDish', { scanId });
                 }}
-                disabled={!isAuthenticated || isCreatingDish}
+                disabled={!isAuthenticated}
               />
             </View>
 
@@ -1826,67 +1765,6 @@ export function PreviewScreen({ route, navigation }: Props) {
                           <Text style={styles.dishRowMeta}>Model: {dish.model_state ?? 'none'}</Text>
                         </View>
                         <Text style={styles.dishRowTag}>{isSelected ? 'Target' : 'Use'}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-
-            <View style={styles.dishCard}>
-              <Text style={styles.label}>Choose Existing 3D Model</Text>
-              {!scan.dishId ? (
-                <Text style={styles.helper}>
-                  Create or choose the target dish first, then apply one of your ready 3D models to it.
-                </Text>
-              ) : null}
-              {isLoadingDishes ? (
-                <ActivityIndicator color={theme.colors.primary} />
-              ) : availableSourceModels.length === 0 ? (
-                <Text style={styles.helper}>
-                  {isAuthenticated
-                    ? 'No reusable 3D models are ready yet. Generate one first, then it will appear here with its preview image.'
-                    : 'Log in to load your reusable 3D models.'}
-                </Text>
-              ) : (
-                <View style={styles.dishList}>
-                  {availableSourceModels.map(dish => {
-                    const isSelected = dish.id === scan.modelSourceDishId;
-                    const previewUrl = getDishModelPreviewUrl(dish);
-
-                    return (
-                      <Pressable
-                        key={`model_${dish.id}`}
-                        style={[styles.dishRow, isSelected && styles.dishRowSelected]}
-                        onPress={() => {
-                          applyExistingModel(dish).catch(() => undefined);
-                        }}
-                        disabled={isCopyingModel}>
-                        <View style={styles.modelPreviewFrame}>
-                          {previewUrl ? (
-                            <Image
-                              source={{ uri: previewUrl }}
-                              style={styles.modelPreviewImage}
-                              resizeMode="cover"
-                            />
-                          ) : (
-                            <View style={styles.modelPreviewFallback}>
-                              <Text style={styles.modelPreviewFallbackText}>3D</Text>
-                            </View>
-                          )}
-                        </View>
-                        <View style={styles.dishRowCopy}>
-                          <Text style={styles.dishRowTitle}>{dish.name}</Text>
-                          <Text style={styles.dishRowMeta}>
-                            {dish.category} • ${dish.price.toFixed(2)}
-                          </Text>
-                          <Text style={styles.dishRowMeta}>
-                            Preview: {previewUrl ? 'available' : 'missing'} • Status: {dish.model_state ?? 'ready'}
-                          </Text>
-                        </View>
-                        <Text style={styles.dishRowTag}>
-                          {isCopyingModel && isSelected ? 'Applying' : isSelected ? 'Applied' : 'Apply'}
-                        </Text>
                       </Pressable>
                     );
                   })}

@@ -163,6 +163,11 @@ export function HomeScreen({ navigation }: Props) {
           </View>
 
           <View style={styles.group}>
+            <AppButton
+              title="Create Dish"
+              variant="secondary"
+              onPress={() => navigation.navigate('CreateDish')}
+            />
             <AppButton title="New Scan" onPress={() => navigation.navigate('Setup')} />
             <AppButton
               title="My Scans"
