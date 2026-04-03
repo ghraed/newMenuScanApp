@@ -18,6 +18,7 @@ import { Screen } from '../components/Screen';
 import {
   menuCopyDishModel,
   menuCreateDish,
+  menuUploadDishPreviewImage,
   menuListDishes,
   menuPublishDish,
   MenuDish,
@@ -27,6 +28,7 @@ import { AppTheme, useAppTheme } from '../lib/theme';
 import { getAuthToken, getAuthUser } from '../storage/authStore';
 import { getScanSession, upsertScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
+import { ScanImageSlot } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateDish'>;
 
@@ -150,6 +152,8 @@ export function CreateDishScreen({ navigation, route }: Props) {
   const [price, setPrice] = useState('');
   const [category, setCategory] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>();
+  const [scanImages, setScanImages] = useState<ScanImageSlot[]>([]);
+  const [selectedPreviewSlot, setSelectedPreviewSlot] = useState<number | undefined>();
   const [previewFallbackDishIds, setPreviewFallbackDishIds] = useState<Set<number>>(() => new Set());
   const [previewStatesByDishId, setPreviewStatesByDishId] = useState<Record<number, PreviewLoadState>>({});
 
@@ -158,9 +162,24 @@ export function CreateDishScreen({ navigation, route }: Props) {
       let isActive = true;
 
       const loadContext = async () => {
+        const nextScanSession = scanId ? getScanSession(scanId) : undefined;
+        const sortedScanImages = [...(nextScanSession?.images ?? [])].sort((a, b) => a.slot - b.slot);
         const nextAuthUser = getAuthUser();
         if (isActive) {
           setAuthUser(nextAuthUser);
+          setScanImages(sortedScanImages);
+          setSelectedPreviewSlot(current => {
+            const preferredSlot = nextScanSession?.previewImageSlot;
+            if (preferredSlot !== undefined && sortedScanImages.some(image => image.slot === preferredSlot)) {
+              return preferredSlot;
+            }
+
+            if (current !== undefined && sortedScanImages.some(image => image.slot === current)) {
+              return current;
+            }
+
+            return sortedScanImages[0]?.slot;
+          });
         }
 
         if (!nextAuthUser?.restaurant) {
@@ -233,7 +252,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
       return () => {
         isActive = false;
       };
-    }, [authUser?.restaurant?.id]),
+    }, [authUser?.restaurant?.id, scanId]),
   );
 
   useEffect(() => {
@@ -241,6 +260,12 @@ export function CreateDishScreen({ navigation, route }: Props) {
       setSelectedModelId(undefined);
     }
   }, [models, selectedModelId]);
+
+  useEffect(() => {
+    if (selectedPreviewSlot !== undefined && !scanImages.some(image => image.slot === selectedPreviewSlot)) {
+      setSelectedPreviewSlot(scanImages[0]?.slot);
+    }
+  }, [scanImages, selectedPreviewSlot]);
 
   const selectedModel = useMemo(
     () => models.find(dish => dish.id === selectedModelId),
@@ -280,6 +305,12 @@ export function CreateDishScreen({ navigation, route }: Props) {
       return;
     }
 
+    const selectedPreviewImage = scanImages.find(image => image.slot === selectedPreviewSlot);
+    if (scanId && scanImages.length > 0 && !selectedPreviewImage) {
+      setStatusState({ kind: 'error', message: 'Choose a preview image from your captured photos.' });
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setStatusState({ kind: 'idle' });
@@ -293,6 +324,9 @@ export function CreateDishScreen({ navigation, route }: Props) {
       });
 
       await menuCopyDishModel(createdDish.id, selectedModel.id);
+      if (selectedPreviewImage) {
+        await menuUploadDishPreviewImage(createdDish.id, selectedPreviewImage.path);
+      }
       const publishedDish = await menuPublishDish(createdDish.id);
 
       if (scanId) {
@@ -305,6 +339,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
             dishName: publishedDish.name,
             modelSourceDishId: selectedModel.id,
             modelSourceDishName: selectedModel.name,
+            previewImageSlot: selectedPreviewImage?.slot ?? session.previewImageSlot,
           });
         }
       }
@@ -357,7 +392,9 @@ export function CreateDishScreen({ navigation, route }: Props) {
     navigation,
     price,
     scanId,
+    scanImages,
     selectedModel,
+    selectedPreviewSlot,
   ]);
 
   return (
@@ -431,6 +468,61 @@ export function CreateDishScreen({ navigation, route }: Props) {
                 Models only show a real thumbnail when that dish already has a preview image. Older models without one will show a name fallback instead.
               </Text>
             </View>
+
+            {scanImages.length > 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.label}>Dish Preview Image</Text>
+                <Text style={styles.selectedModelName}>
+                  {selectedPreviewSlot !== undefined
+                    ? `Captured photo ${selectedPreviewSlot + 1} selected`
+                    : 'Choose one captured photo below.'}
+                </Text>
+                <Text style={styles.helper}>
+                  This photo will be uploaded as the dish preview image and guests will see it instead of a model-generated thumbnail.
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.previewStrip}
+                  keyboardShouldPersistTaps="handled">
+                  {scanImages.map(image => {
+                    const isSelected = image.slot === selectedPreviewSlot;
+                    const uri = image.path.startsWith('file://') ? image.path : `file://${image.path}`;
+
+                    return (
+                      <Pressable
+                        key={`${image.slot}_${image.timestamp}`}
+                        style={[styles.previewChoice, isSelected && styles.previewChoiceSelected]}
+                        onPress={() => {
+                          setSelectedPreviewSlot(image.slot);
+
+                          if (scanId) {
+                            const session = getScanSession(scanId);
+                            if (session) {
+                              upsertScanSession({
+                                ...session,
+                                previewImageSlot: image.slot,
+                              }).catch(() => undefined);
+                            }
+                          }
+                        }}>
+                        <Image
+                          source={{ uri }}
+                          style={[
+                            styles.previewChoiceImage,
+                            isSelected && styles.previewChoiceImageSelected,
+                          ]}
+                          resizeMode="cover"
+                        />
+                        <Text style={styles.previewChoiceLabel}>
+                          {isSelected ? `Preview ${image.slot + 1}` : `Photo ${image.slot + 1}`}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ) : null}
           </View>
 
           <View style={[styles.card, styles.modelsCard]}>
@@ -633,6 +725,37 @@ function createStyles(theme: AppTheme) {
       lineHeight: theme.typography.title.lineHeight,
       fontWeight: theme.typography.title.fontWeight,
       letterSpacing: theme.typography.title.letterSpacing,
+    },
+    previewStrip: {
+      gap: theme.spacing.sm,
+      paddingRight: theme.spacing.xs,
+    },
+    previewChoice: {
+      width: 112,
+      gap: theme.spacing.xs,
+    },
+    previewChoiceSelected: {
+      opacity: 1,
+    },
+    previewChoiceImage: {
+      width: 112,
+      height: 112,
+      borderRadius: theme.radius.md,
+      borderWidth: 2,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: theme.colors.surfaceAlt,
+    },
+    previewChoiceImageSelected: {
+      borderColor: theme.colors.primary,
+    },
+    previewChoiceLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+      textAlign: 'center',
     },
     modelList: {
       gap: theme.spacing.sm,

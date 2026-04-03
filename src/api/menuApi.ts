@@ -102,6 +102,35 @@ export type MenuCreateDishInput = {
   status: 'draft' | 'published';
 };
 
+function getFileNameFromPath(path: string, fallback: string) {
+  const normalized = path.replace(/^file:\/\//, '');
+  const parts = normalized.split('/');
+  const candidate = parts[parts.length - 1];
+  return candidate && candidate.trim().length > 0 ? candidate : fallback;
+}
+
+function getMimeTypeFromPath(path: string) {
+  const normalized = path.toLowerCase();
+
+  if (normalized.endsWith('.png')) {
+    return 'image/png';
+  }
+
+  if (normalized.endsWith('.webp')) {
+    return 'image/webp';
+  }
+
+  if (normalized.endsWith('.heic')) {
+    return 'image/heic';
+  }
+
+  if (normalized.endsWith('.heif')) {
+    return 'image/heif';
+  }
+
+  return 'image/jpeg';
+}
+
 export function resolveMenuAssetUrl(rawUrl?: string | null): string | undefined {
   if (!rawUrl) {
     return undefined;
@@ -203,6 +232,15 @@ export async function menuListDishes(): Promise<MenuDish[]> {
   }
 }
 
+export async function menuGetDish(dishId: number): Promise<MenuDish> {
+  try {
+    const response = await menuApiClient.get(`/dishes/${dishId}`);
+    return normalizeDish(dishSchema.parse(response.data));
+  } catch (error) {
+    throw toApiError(error, 'Failed to load dish');
+  }
+}
+
 export async function menuCreateDish(input: MenuCreateDishInput): Promise<MenuDish> {
   try {
     const response = await menuApiClient.post('/dishes', {
@@ -240,5 +278,27 @@ export async function menuPublishDish(dishId: number): Promise<MenuDish> {
     return normalizeDish(dishSchema.parse(response.data));
   } catch (error) {
     throw toApiError(error, 'Failed to publish dish');
+  }
+}
+
+export async function menuUploadDishPreviewImage(
+  dishId: number,
+  filePath: string,
+): Promise<void> {
+  try {
+    const uri = filePath.startsWith('file://') ? filePath : `file://${filePath}`;
+    const formData = new FormData();
+    formData.append('type', 'preview_image');
+    formData.append('file', {
+      uri,
+      name: getFileNameFromPath(filePath, 'preview.jpg'),
+      type: getMimeTypeFromPath(filePath),
+    } as never);
+
+    await menuApiClient.post(`/dishes/${dishId}/assets`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  } catch (error) {
+    throw toApiError(error, 'Failed to upload preview image');
   }
 }

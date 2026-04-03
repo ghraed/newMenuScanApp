@@ -68,6 +68,7 @@ export type ScanSession = {
   dishName?: string;
   modelSourceDishId?: number;
   modelSourceDishName?: string;
+  previewImageSlot?: number;
   publishOnCreate?: boolean;
   targetType: ScanTargetType;
   captureMode: ScanCaptureMode;

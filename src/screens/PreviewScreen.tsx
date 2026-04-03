@@ -7,6 +7,7 @@ import {
   PermissionsAndroid,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -30,7 +31,14 @@ import {
   buildRgbaUrl,
 } from '../api/scansApi';
 import { getApiKey } from '../api/config';
-import { menuCopyDishModel, menuCreateDish, menuListDishes, MenuDish } from '../api/menuApi';
+import {
+  menuCopyDishModel,
+  menuCreateDish,
+  menuGetDish,
+  menuListDishes,
+  menuUploadDishPreviewImage,
+  MenuDish,
+} from '../api/menuApi';
 import {
   cropFileToSelectionInPlace,
   getSelectionUploadUri,
@@ -207,6 +215,7 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [isLoadingDishes, setIsLoadingDishes] = useState(false);
   const [isCreatingDish, setIsCreatingDish] = useState(false);
   const [isCopyingModel, setIsCopyingModel] = useState(false);
+  const [isUpdatingPreviewImage, setIsUpdatingPreviewImage] = useState(false);
   const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
   const [newDishName, setNewDishName] = useState('');
   const [newDishDescription, setNewDishDescription] = useState('');
@@ -1609,6 +1618,24 @@ export function PreviewScreen({ route, navigation }: Props) {
     () => dishes.find(dish => dish.id === scan?.dishId),
     [dishes, scan?.dishId],
   );
+  const orderedCapturedImages = useMemo(
+    () => [...(scan?.images ?? [])].sort((a, b) => a.slot - b.slot),
+    [scan?.images],
+  );
+  const selectedPreviewCapture = useMemo(() => {
+    if (orderedCapturedImages.length === 0) {
+      return undefined;
+    }
+
+    if (scan?.previewImageSlot !== undefined) {
+      const matched = orderedCapturedImages.find(image => image.slot === scan.previewImageSlot);
+      if (matched) {
+        return matched;
+      }
+    }
+
+    return orderedCapturedImages[0];
+  }, [orderedCapturedImages, scan?.previewImageSlot]);
   const reusableModelDishes = useMemo(
     () => dishes.filter(dishHasReusableModel),
     [dishes],
@@ -1650,8 +1677,93 @@ export function PreviewScreen({ route, navigation }: Props) {
   const isAuthenticated = Boolean(authUser?.restaurant);
   const selectedDishName = selectedTargetDish?.name ?? scan?.dishName;
   const selectedSourceModelName = selectedSourceModel?.name ?? scan?.modelSourceDishName;
+  const selectedPreviewLabel = selectedPreviewCapture
+    ? `Photo ${selectedPreviewCapture.slot + 1}`
+    : 'Choose a captured photo below.';
   const modelDownloadUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
   const usdzOpenUrl = scan?.outputs?.usdzSignedUrl ?? scan?.outputs?.usdzUrl;
+
+  const selectPreviewImageSlot = React.useCallback(
+    async (slot: number) => {
+      const latest = getScanSession(scanId) ?? scan;
+      if (!latest) {
+        return;
+      }
+
+      await commitSession({
+        ...latest,
+        previewImageSlot: slot,
+      });
+    },
+    [commitSession, scan, scanId],
+  );
+
+  const applyPreviewImageToDish = React.useCallback(async () => {
+    const latest = getScanSession(scanId) ?? scan;
+    if (!latest) {
+      return;
+    }
+
+    if (!authUser?.restaurant) {
+      setDishState({
+        kind: 'error',
+        message: 'Log in from Home before setting a preview image.',
+      });
+      return;
+    }
+
+    if (!latest.dishId) {
+      setDishState({
+        kind: 'error',
+        message: 'Choose or create the target dish before setting its preview image.',
+      });
+      return;
+    }
+
+    const previewCapture =
+      orderedCapturedImages.find(image => image.slot === latest.previewImageSlot) ??
+      orderedCapturedImages[0];
+
+    if (!previewCapture) {
+      setDishState({
+        kind: 'error',
+        message: 'Capture at least one image before setting a preview image.',
+      });
+      return;
+    }
+
+    try {
+      setIsUpdatingPreviewImage(true);
+      setDishState({ kind: 'idle' });
+
+      await menuUploadDishPreviewImage(latest.dishId, previewCapture.path);
+      const updatedDish = await menuGetDish(latest.dishId);
+
+      setDishes(current =>
+        current.map(dish => (dish.id === updatedDish.id ? updatedDish : dish)),
+      );
+
+      const next = await commitSession({
+        ...latest,
+        dishId: updatedDish.id,
+        dishName: updatedDish.name,
+        previewImageSlot: previewCapture.slot,
+      });
+
+      setScan(next);
+      setDishState({
+        kind: 'success',
+        message: `Preview image updated from photo ${previewCapture.slot + 1}.`,
+      });
+    } catch (error) {
+      setDishState({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Could not update the preview image.',
+      });
+    } finally {
+      setIsUpdatingPreviewImage(false);
+    }
+  }, [authUser?.restaurant, commitSession, orderedCapturedImages, scan, scanId]);
 
   return (
     <Screen
@@ -1770,6 +1882,69 @@ export function PreviewScreen({ route, navigation }: Props) {
                   })}
                 </View>
               )}
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Dish Preview Image</Text>
+            <View style={styles.dishCard}>
+              <Text style={styles.label}>Selected Preview Photo</Text>
+              <Text style={styles.selectedDishName}>{selectedPreviewLabel}</Text>
+              <Text style={styles.helper}>
+                Pick one of your captured photos. This image will be uploaded as the dish preview and can be changed later.
+              </Text>
+
+              {orderedCapturedImages.length === 0 ? (
+                <Text style={styles.helper}>
+                  Capture at least one image from the Scan screen before choosing a preview photo.
+                </Text>
+              ) : (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.previewPickerRow}
+                  keyboardShouldPersistTaps="handled">
+                  {orderedCapturedImages.map(capture => {
+                    const isSelected = capture.slot === selectedPreviewCapture?.slot;
+                    const uri = capture.path.startsWith('file://') ? capture.path : `file://${capture.path}`;
+
+                    return (
+                      <Pressable
+                        key={`${capture.slot}_${capture.timestamp}`}
+                        style={styles.previewPickerItem}
+                        onPress={() => {
+                          selectPreviewImageSlot(capture.slot).catch(() => undefined);
+                        }}>
+                        <Image
+                          source={{ uri }}
+                          style={[
+                            styles.previewPickerImage,
+                            isSelected && styles.previewPickerImageSelected,
+                          ]}
+                        />
+                        <Text style={styles.previewPickerLabel}>
+                          {isSelected ? `Preview ${capture.slot + 1}` : `Photo ${capture.slot + 1}`}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
+              <AppButton
+                title={isUpdatingPreviewImage ? 'Updating Preview Image...' : 'Apply Preview Image to Dish'}
+                onPress={() => {
+                  applyPreviewImageToDish().catch(() => undefined);
+                }}
+                disabled={
+                  !isAuthenticated ||
+                  isSubmitting ||
+                  isExporting ||
+                  isUpdatingPreviewImage ||
+                  orderedCapturedImages.length === 0 ||
+                  !scan.dishId
+                }
+              />
             </View>
           </View>
 
@@ -2212,6 +2387,34 @@ function createStyles(theme: AppTheme) {
       fontWeight: theme.typography.label.fontWeight,
       letterSpacing: theme.typography.label.letterSpacing,
       textTransform: theme.typography.label.textTransform,
+    },
+    previewPickerRow: {
+      gap: theme.spacing.sm,
+      paddingRight: theme.spacing.xs,
+    },
+    previewPickerItem: {
+      width: 112,
+      gap: theme.spacing.xs,
+    },
+    previewPickerImage: {
+      width: 112,
+      height: 112,
+      borderRadius: theme.radius.md,
+      borderWidth: 2,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: theme.colors.surfaceAlt,
+    },
+    previewPickerImageSelected: {
+      borderColor: theme.colors.primary,
+    },
+    previewPickerLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+      textAlign: 'center',
     },
     progressCard: {
       backgroundColor: theme.colors.surface,
