@@ -253,6 +253,45 @@ export function ScanScreen({ route, navigation }: Props) {
     });
   }, [autoCapture]);
 
+  const onFocusObjectPoint = useCallback(
+    async ({
+      x,
+      y,
+    }: {
+      x: number;
+      y: number;
+      viewportSize?: ObjectSelection['viewportSize'];
+    }): Promise<{ success?: boolean; message?: string }> => {
+      if (!permissionGranted || !device || !isCameraReady || !camera.current) {
+        return {
+          success: false,
+          message: 'Camera focus is not ready yet, but you can still adjust the guide manually.',
+        };
+      }
+
+      if (!device.supportsFocus) {
+        return {
+          success: false,
+          message: 'This camera does not support tap-to-focus, but you can still adjust the guide manually.',
+        };
+      }
+
+      try {
+        await camera.current.focus({ x, y });
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          message:
+            error instanceof Error
+              ? `${error.message} You can still adjust the guide manually.`
+              : 'Focus failed, but you can still adjust the guide manually.',
+        };
+      }
+    },
+    [device, isCameraReady, permissionGranted],
+  );
+
   const onConfirmObjectSelection = useCallback(
     async (selection: ObjectSelection) => {
       if (!session) {
@@ -375,6 +414,7 @@ export function ScanScreen({ route, navigation }: Props) {
         {!hasObjectSelection ? (
           <ObjectSelectionOverlay
             onConfirm={onConfirmObjectSelection}
+            onFocusPoint={onFocusObjectPoint}
             targetType={session.targetType}
             disabled={isSavingSelection}
           />

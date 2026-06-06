@@ -13,6 +13,11 @@ import { AppButton } from './AppButton';
 
 type Props = {
   onConfirm: (selection: ObjectSelection) => void;
+  onFocusPoint?: (point: {
+    x: number;
+    y: number;
+    viewportSize: ObjectSelection['viewportSize'];
+  }) => Promise<{ success?: boolean; message?: string } | void>;
   targetType?: ScanTargetType;
   disabled?: boolean;
 };
@@ -48,7 +53,7 @@ function getBoxDimensions(size: number, targetType: ScanTargetType) {
   };
 }
 
-function buildCenteredBox(
+export function buildCenteredBox(
   centerX: number,
   centerY: number,
   size: number,
@@ -66,6 +71,7 @@ function buildCenteredBox(
 
 export function ObjectSelectionOverlay({
   onConfirm,
+  onFocusPoint,
   targetType = 'dish',
   disabled = false,
 }: Props) {
@@ -76,10 +82,13 @@ export function ObjectSelectionOverlay({
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const [selectionStarted, setSelectionStarted] = useState(false);
   const [instructionsVisible, setInstructionsVisible] = useState(true);
+  const [focusState, setFocusState] = useState<'idle' | 'focusing' | 'ready' | 'failed'>('idle');
+  const [focusMessage, setFocusMessage] = useState<string | null>(null);
   const dragStartRef = useRef<ObjectSelectionRect | null>(null);
 
   const hasLayout = layout.width > 0 && layout.height > 0;
   const hasSelection = Boolean(bbox);
+  const focusChosen = focusState === 'ready' || focusState === 'failed';
   const canConfirm = Boolean(selectionStarted && hasLayout && bbox && !disabled);
   const focusSizeLabel = bbox
     ? `${Math.round(Math.max(bbox.width, bbox.height) * 100)}%`
@@ -94,7 +103,7 @@ export function ObjectSelectionOverlay({
   };
 
   const resizeBboxAroundCenter = (delta: number) => {
-    if (!bbox) {
+    if (!bbox || !focusChosen) {
       return;
     }
 
@@ -109,16 +118,47 @@ export function ObjectSelectionOverlay({
     setSelection(nextBox);
   };
 
-  const setBoxFromTap = (xPx: number, yPx: number) => {
-    if (!hasLayout) {
+  const setBoxFromTap = async (xPx: number, yPx: number) => {
+    if (!hasLayout || disabled || focusState === 'focusing' || focusChosen) {
       return;
     }
 
     const centerX = clamp(xPx / layout.width, 0, 1);
     const centerY = clamp(yPx / layout.height, 0, 1);
     const nextSize = bbox ? Math.max(bbox.width, bbox.height) : DEFAULT_SELECTION_SIZE;
+    const nextBox = buildCenteredBox(centerX, centerY, nextSize, targetType);
+    const viewportSize = {
+      width: layout.width,
+      height: layout.height,
+    };
+    let nextFocusState: 'ready' | 'failed' = 'ready';
+    let nextFocusMessage: string | null = null;
 
-    setSelection(buildCenteredBox(centerX, centerY, nextSize, targetType));
+    setFocusState('focusing');
+
+    try {
+      const result = await onFocusPoint?.({
+        x: xPx,
+        y: yPx,
+        viewportSize,
+      });
+
+      if (result?.success === false) {
+        nextFocusState = 'failed';
+        nextFocusMessage =
+          result.message ?? 'Focus is unavailable right now, but you can still adjust the guide manually.';
+      }
+    } catch (error) {
+      nextFocusState = 'failed';
+      nextFocusMessage =
+        error instanceof Error
+          ? error.message
+          : 'Focus is unavailable right now, but you can still adjust the guide manually.';
+    }
+
+    setSelection(nextBox);
+    setFocusState(nextFocusState);
+    setFocusMessage(nextFocusMessage);
   };
 
   const onLayout = (event: LayoutChangeEvent) => {
@@ -189,9 +229,10 @@ export function ObjectSelectionOverlay({
           style={styles.touchLayer}
           onLayout={onLayout}
           onPress={event => {
-            setBoxFromTap(event.nativeEvent.locationX, event.nativeEvent.locationY);
+            setBoxFromTap(event.nativeEvent.locationX, event.nativeEvent.locationY).catch(() => undefined);
           }}
-          disabled={!selectionStarted || disabled}
+          disabled={!selectionStarted || disabled || focusChosen || focusState === 'focusing'}
+          testID="object-selection-touch-layer"
         />
 
         {bbox ? (
@@ -203,7 +244,7 @@ export function ObjectSelectionOverlay({
         ) : null}
       </View>
 
-      {selectionStarted ? (
+      {selectionStarted && focusChosen ? (
         <Pressable
           style={[styles.infoButton, disabled && styles.actionDisabled]}
           onPress={() => setInstructionsVisible(true)}
@@ -217,52 +258,62 @@ export function ObjectSelectionOverlay({
           <View style={styles.hintCard}>
             <Text style={styles.hintTitle}>{hasSelection ? 'Adjust The Selection' : 'Tap The Object'}</Text>
             <Text style={styles.hintText}>
-              {hasSelection
-                ? 'Use the circle buttons to tighten or loosen the guide, then confirm.'
-                : 'Tap the object to place the guide. Keep it large in frame and away from the screen edges.'}
+              {focusState === 'focusing'
+                ? 'Hold still for a moment while the camera focuses on the tapped point.'
+                : focusChosen
+                  ? 'Use the circle buttons to tighten or loosen the guide, then confirm.'
+                  : 'Tap the object to focus it first. After focus is set, you can size and confirm the guide.'}
             </Text>
+            {focusMessage ? <Text style={styles.focusMessage}>{focusMessage}</Text> : null}
           </View>
 
-          <View style={styles.bottomCard}>
-            <View style={styles.resizeRow}>
-              <Pressable
-                style={[styles.circleButton, (!bbox || disabled) && styles.actionDisabled]}
-                onPress={() => resizeBboxAroundCenter(-SIZE_STEP)}
-                disabled={!bbox || disabled}>
-                <Text style={styles.circleButtonText}>-</Text>
-              </Pressable>
-              <View style={styles.sizeBadge}>
-                <Text style={styles.sizeBadgeLabel}>Selection</Text>
-                <Text style={styles.sizeBadgeValue}>{focusSizeLabel}</Text>
+          {focusChosen ? (
+            <View style={styles.bottomCard}>
+              <View style={styles.resizeRow}>
+                <Pressable
+                  style={[styles.circleButton, (!bbox || disabled) && styles.actionDisabled]}
+                  onPress={() => resizeBboxAroundCenter(-SIZE_STEP)}
+                  disabled={!bbox || disabled}
+                  testID="selection-size-decrease">
+                  <Text style={styles.circleButtonText}>-</Text>
+                </Pressable>
+                <View style={styles.sizeBadge}>
+                  <Text style={styles.sizeBadgeLabel}>Selection</Text>
+                  <Text style={styles.sizeBadgeValue}>{focusSizeLabel}</Text>
+                </View>
+                <Pressable
+                  style={[styles.circleButton, (!bbox || disabled) && styles.actionDisabled]}
+                  onPress={() => resizeBboxAroundCenter(SIZE_STEP)}
+                  disabled={!bbox || disabled}
+                  testID="selection-size-increase">
+                  <Text style={styles.circleButtonText}>+</Text>
+                </Pressable>
               </View>
-              <Pressable
-                style={[styles.circleButton, (!bbox || disabled) && styles.actionDisabled]}
-                onPress={() => resizeBboxAroundCenter(SIZE_STEP)}
-                disabled={!bbox || disabled}>
-                <Text style={styles.circleButtonText}>+</Text>
-              </Pressable>
-            </View>
 
-            <View style={styles.actionRow}>
-              <Pressable
-                style={[styles.resetButton, disabled && styles.actionDisabled]}
-                onPress={() => {
-                  setBbox(null);
-                  setPoint(null);
-                }}
-                disabled={disabled}>
-                <Text style={styles.resetButtonText}>Reset</Text>
-              </Pressable>
-            </View>
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={[styles.resetButton, disabled && styles.actionDisabled]}
+                  onPress={() => {
+                    setBbox(null);
+                    setPoint(null);
+                    setFocusState('idle');
+                    setFocusMessage(null);
+                  }}
+                  disabled={disabled}
+                  testID="selection-reset-button">
+                  <Text style={styles.resetButtonText}>Reset</Text>
+                </Pressable>
+              </View>
 
-            {bbox ? (
-              <AppButton
-                title={disabled ? 'Saving...' : 'Confirm Object'}
-                onPress={confirmSelection}
-                disabled={!canConfirm}
-              />
-            ) : null}
-          </View>
+              {bbox ? (
+                <AppButton
+                  title={disabled ? 'Saving...' : 'Confirm Object'}
+                  onPress={confirmSelection}
+                  disabled={!canConfirm}
+                />
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -275,7 +326,7 @@ export function ObjectSelectionOverlay({
               Move the camera until the object fills most of the screen without touching the edges.
             </Text>
             <Text style={styles.instructionsStep}>1. Tap Start Selection.</Text>
-            <Text style={styles.instructionsStep}>2. Tap the object to place the guide.</Text>
+            <Text style={styles.instructionsStep}>2. Tap the object to focus it.</Text>
             <Text style={styles.instructionsStep}>3. Use - and + to adjust the guide size.</Text>
             <Text style={styles.instructionsStep}>4. Confirm the object, then begin capturing.</Text>
             <AppButton
@@ -386,6 +437,14 @@ function createStyles(theme: AppTheme) {
       fontWeight: theme.typography.bodySmall.fontWeight,
       letterSpacing: theme.typography.bodySmall.letterSpacing,
       opacity: 0.78,
+    },
+    focusMessage: {
+      color: theme.colors.cameraReady,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: '500',
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
     },
     bottomCard: {
       borderRadius: theme.radius.xl,
