@@ -48,6 +48,8 @@ export type AutoCaptureIssue =
   | 'hold_steady'
   | 'cooldown'
   | 'capturing'
+  | 'turntable_calibrating'
+  | 'turntable_prespin'
   | 'camera_unavailable';
 
 export type CaptureTarget = {

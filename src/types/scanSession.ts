@@ -7,6 +7,7 @@ export type ScanImageSlot = {
 
 export type ScanTargetType = 'dish' | 'juice';
 export type ScanCaptureMode = 'orbit' | 'turntable';
+export type TurntableSpeedPresetId = 'quality' | 'balanced' | 'experimental';
 
 export type ObjectSelectionMethod = 'tap' | 'box';
 
@@ -60,6 +61,17 @@ export type ScanSessionStatus =
   | 'ready'
   | 'error';
 
+export type TurntableConfig = {
+  speedPresetId: TurntableSpeedPresetId;
+  targetRotationPeriodMs: number;
+  calibrationSampleStartedAt?: number;
+  calibrationSampleTimestamps?: number[];
+  measuredRotationPeriodMs?: number;
+  calibrationCompletedAt?: number;
+  preSpinStartedAt?: number;
+  captureStartAt?: number;
+};
+
 export type ScanSession = {
   id: string;
   createdAt: number;
@@ -74,6 +86,7 @@ export type ScanSession = {
   captureMode: ScanCaptureMode;
   scaleMeters: number;
   slotsTotal: number;
+  turntableConfig?: TurntableConfig;
   images: ScanImageSlot[];
   objectSelection?: ObjectSelection;
   status: ScanSessionStatus;

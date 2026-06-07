@@ -1,8 +1,9 @@
 import RNFS from 'react-native-fs';
 import { createMMKV } from 'react-native-mmkv';
 import { getDefaultCapturePattern } from '../lib/captureGuidance';
+import { createDefaultTurntableConfig } from '../lib/turntable';
 import { createUuid } from '../utils/uuid';
-import { ScanCaptureMode, ScanSession, ScanTargetType } from '../types/scanSession';
+import { ScanCaptureMode, ScanSession, ScanTargetType, TurntableSpeedPresetId } from '../types/scanSession';
 
 const storage = createMMKV({ id: 'scans-storage' });
 
@@ -10,7 +11,7 @@ const SCANS_STORAGE_KEY = 'scans:sessions:v1';
 const DEFAULT_SCALE_METERS = 0.24;
 const DEFAULT_SLOTS_TOTAL = getDefaultCapturePattern().totalShots;
 const DEFAULT_TARGET_TYPE: ScanTargetType = 'dish';
-const DEFAULT_CAPTURE_MODE: ScanCaptureMode = 'orbit';
+const DEFAULT_CAPTURE_MODE: ScanCaptureMode = 'turntable';
 const SCANS_ROOT_PATH = `${RNFS.DocumentDirectoryPath}/scans`;
 let scansRootEnsured = false;
 const ensuredScanDirectoryIds = new Set<string>();
@@ -20,6 +21,10 @@ function normalizeSession(session: ScanSession): ScanSession {
     ...session,
     targetType: session.targetType ?? DEFAULT_TARGET_TYPE,
     captureMode: session.captureMode ?? DEFAULT_CAPTURE_MODE,
+    turntableConfig:
+      (session.captureMode ?? DEFAULT_CAPTURE_MODE) === 'turntable'
+        ? session.turntableConfig ?? createDefaultTurntableConfig()
+        : undefined,
   };
 }
 
@@ -113,6 +118,7 @@ export async function createScanSession(
   slotsTotal: number = DEFAULT_SLOTS_TOTAL,
   targetType: ScanTargetType = DEFAULT_TARGET_TYPE,
   captureMode: ScanCaptureMode = DEFAULT_CAPTURE_MODE,
+  turntableSpeedPresetId?: TurntableSpeedPresetId,
 ): Promise<ScanSession> {
   const session: ScanSession = {
     id: createUuid(),
@@ -121,6 +127,8 @@ export async function createScanSession(
     captureMode,
     scaleMeters,
     slotsTotal,
+    turntableConfig:
+      captureMode === 'turntable' ? createDefaultTurntableConfig(turntableSpeedPresetId) : undefined,
     images: [],
     status: 'draft',
   };

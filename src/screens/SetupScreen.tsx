@@ -4,15 +4,20 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import { CAPTURE_PATTERNS, getDefaultCapturePattern } from '../lib/captureGuidance';
+import {
+  DEFAULT_TURNTABLE_SPEED_PRESET_ID,
+  TURNTABLE_SPEED_PRESETS,
+  getTurntableCaptureIntervalMs,
+} from '../lib/turntable';
 import { AppTheme, useAppTheme } from '../lib/theme';
 import { createScanSession } from '../storage/scansStore';
 import { RootStackParamList } from '../types/navigation';
-import { ScanCaptureMode, ScanTargetType } from '../types/scanSession';
+import { ScanCaptureMode, ScanTargetType, TurntableSpeedPresetId } from '../types/scanSession';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Setup'>;
 
 const DEFAULT_OBJECT_TYPE: ScanTargetType = 'dish';
-const DEFAULT_CAPTURE_MODE: ScanCaptureMode = 'orbit';
+const DEFAULT_CAPTURE_MODE: ScanCaptureMode = 'turntable';
 const DEFAULT_OBJECT_SIZES: Record<ScanTargetType, number> = {
   dish: 0.24,
   juice: 0.08,
@@ -35,6 +40,8 @@ export function SetupScreen({ navigation }: Props) {
     String(metersToCentimeters(DEFAULT_OBJECT_SIZES[DEFAULT_OBJECT_TYPE])),
   );
   const [selectedPatternTotal, setSelectedPatternTotal] = useState(getDefaultCapturePattern().totalShots);
+  const [selectedTurntablePresetId, setSelectedTurntablePresetId] =
+    useState<TurntableSpeedPresetId>(DEFAULT_TURNTABLE_SPEED_PRESET_ID);
 
   const parsedSizeCm = useMemo(() => Number.parseFloat(dishSizeInput), [dishSizeInput]);
   const isValid =
@@ -45,6 +52,14 @@ export function SetupScreen({ navigation }: Props) {
     () => CAPTURE_PATTERNS.find(pattern => pattern.totalShots === selectedPatternTotal) ?? getDefaultCapturePattern(),
     [selectedPatternTotal],
   );
+  const selectedTurntablePreset = useMemo(
+    () => TURNTABLE_SPEED_PRESETS.find(preset => preset.id === selectedTurntablePresetId) ?? TURNTABLE_SPEED_PRESETS[0],
+    [selectedTurntablePresetId],
+  );
+  const selectedTurntableIntervalMs = useMemo(
+    () => Math.round(getTurntableCaptureIntervalMs(selectedTurntablePreset.fullRotationMs, selectedPattern.totalShots)),
+    [selectedPattern.totalShots, selectedTurntablePreset.fullRotationMs],
+  );
   const sizeLabel = selectedTargetType === 'dish' ? 'Dish Size (cm)' : 'Juice Width (cm)';
   const objectTypeDescription =
     selectedTargetType === 'dish'
@@ -52,7 +67,7 @@ export function SetupScreen({ navigation }: Props) {
       : 'Use the standard guide shape for bottles, cans, and glasses.';
   const captureModeDescription =
     selectedCaptureMode === 'turntable'
-      ? 'Keep the phone fixed and let the object rotate. The app captures every 500 ms.'
+      ? 'Keep the phone fixed, calibrate one steady rotation, then capture at evenly spaced times.'
       : 'Move the phone around the object and let the guided capture flow choose each angle.';
 
   useEffect(() => {
@@ -72,6 +87,7 @@ export function SetupScreen({ navigation }: Props) {
       selectedPattern.totalShots,
       selectedTargetType,
       selectedCaptureMode,
+      selectedTurntablePresetId,
     );
     navigation.replace('Scan', { scanId: session.id });
   };
@@ -103,8 +119,12 @@ export function SetupScreen({ navigation }: Props) {
                 key={option.id}
                 style={[styles.optionCard, isSelected && styles.optionCardSelected]}
                 onPress={() => setSelectedTargetType(option.id)}>
-                <Text style={styles.optionTitle}>{option.title}</Text>
-                <Text style={styles.optionDescription}>{option.description}</Text>
+                <Text style={[styles.optionTitle, isSelected && styles.optionTitleSelected]}>
+                  {option.title}
+                </Text>
+                <Text style={[styles.optionDescription, isSelected && styles.optionDescriptionSelected]}>
+                  {option.description}
+                </Text>
               </Pressable>
             );
           })}
@@ -124,7 +144,7 @@ export function SetupScreen({ navigation }: Props) {
             {
               id: 'turntable',
               title: 'Rotate Object',
-              description: 'Keep the phone fixed while the object rotates and capture every 500 ms.',
+              description: 'Keep the phone fixed while the object rotates, calibrate one turn, then capture evenly.',
             },
           ] as const).map(option => {
             const isSelected = option.id === selectedCaptureMode;
@@ -134,13 +154,45 @@ export function SetupScreen({ navigation }: Props) {
                 key={option.id}
                 style={[styles.optionCard, isSelected && styles.optionCardSelected]}
                 onPress={() => setSelectedCaptureMode(option.id)}>
-                <Text style={styles.optionTitle}>{option.title}</Text>
-                <Text style={styles.optionDescription}>{option.description}</Text>
+                <Text style={[styles.optionTitle, isSelected && styles.optionTitleSelected]}>
+                  {option.title}
+                </Text>
+                <Text style={[styles.optionDescription, isSelected && styles.optionDescriptionSelected]}>
+                  {option.description}
+                </Text>
               </Pressable>
             );
           })}
         </View>
       </View>
+
+      {selectedCaptureMode === 'turntable' ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>Turntable Speed</Text>
+          <Text style={styles.helper}>
+            Choose the rotation preset. The app calibrates the real loaded speed before shooting.
+          </Text>
+          <View style={styles.optionList}>
+            {TURNTABLE_SPEED_PRESETS.filter(preset => !preset.experimental).map(preset => {
+              const isSelected = preset.id === selectedTurntablePresetId;
+
+              return (
+                <Pressable
+                  key={preset.id}
+                  style={[styles.optionCard, isSelected && styles.optionCardSelected]}
+                  onPress={() => setSelectedTurntablePresetId(preset.id)}>
+                  <Text style={[styles.optionTitle, isSelected && styles.optionTitleSelected]}>
+                    {preset.title}
+                  </Text>
+                  <Text style={[styles.optionDescription, isSelected && styles.optionDescriptionSelected]}>
+                    {preset.description}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.label}>{sizeLabel}</Text>
@@ -171,7 +223,7 @@ export function SetupScreen({ navigation }: Props) {
         <Text style={styles.label}>Capture Pattern</Text>
         <Text style={styles.helper}>
           {selectedCaptureMode === 'turntable'
-            ? 'Choose how many photos to capture while the object rotates. The app takes one photo every 500 ms until the full total is reached.'
+            ? `Choose how many photos to capture during one measured rotation. With ${selectedTurntablePreset.title.toLowerCase()} speed, this is about ${selectedTurntableIntervalMs} ms between shots.`
             : 'Choose how many guided photos the scan will require. Finish unlocks only after the full pattern is captured.'}
         </Text>
         <View style={styles.patternList}>
@@ -194,7 +246,9 @@ export function SetupScreen({ navigation }: Props) {
                 <Text style={styles.patternDescription}>{pattern.description}</Text>
                 <Text style={styles.patternStages}>
                   {selectedCaptureMode === 'turntable'
-                    ? `${pattern.totalShots} timed captures`
+                    ? `${pattern.totalShots} timed captures • ~${Math.round(
+                        getTurntableCaptureIntervalMs(selectedTurntablePreset.fullRotationMs, pattern.totalShots),
+                      )} ms/shot`
                     : pattern.stages
                         .map(stage => `${stage.shots} ${stage.shortTitle.toLowerCase()}`)
                         .join(' • ')}
@@ -280,7 +334,7 @@ function createStyles(theme: AppTheme) {
     },
     optionCardSelected: {
       borderColor: theme.colors.primary,
-      backgroundColor: theme.colors.primarySoft,
+      backgroundColor: theme.colors.primary,
       ...theme.shadows.highlight,
     },
     optionTitle: {
@@ -291,6 +345,9 @@ function createStyles(theme: AppTheme) {
       fontWeight: theme.typography.sectionTitle.fontWeight,
       letterSpacing: 0.2,
     },
+    optionTitleSelected: {
+      color: theme.colors.primaryContrast,
+    },
     optionDescription: {
       color: theme.colors.textMuted,
       fontFamily: theme.typography.bodySmall.fontFamily,
@@ -298,6 +355,10 @@ function createStyles(theme: AppTheme) {
       lineHeight: theme.typography.bodySmall.lineHeight,
       fontWeight: theme.typography.bodySmall.fontWeight,
       letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    optionDescriptionSelected: {
+      color: theme.colors.primaryContrast,
+      opacity: 0.84,
     },
     patternList: {
       gap: theme.spacing.sm,

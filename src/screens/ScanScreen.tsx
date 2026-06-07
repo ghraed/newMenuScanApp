@@ -15,6 +15,15 @@ import {
   getGhostGuideBoxRect,
   validateSelectionFraming,
 } from '../lib/captureGuidance';
+import {
+  TURNTABLE_CALIBRATION_ROTATIONS,
+  createDefaultTurntableConfig,
+  getTurntableCaptureIntervalMs,
+  getTurntableCaptureStartAt,
+  getTurntableRotationPeriodMs,
+  getTurntableSpeedPreset,
+  getMedianRotationPeriodMs,
+} from '../lib/turntable';
 import { useHeading } from '../hooks/useHeading';
 import { AppTheme, useAppTheme } from '../lib/theme';
 import { getScanSession, upsertScanSession } from '../storage/scansStore';
@@ -28,6 +37,14 @@ type GuidanceMessage = {
   title: string;
   message: string;
 };
+
+function formatDurationMs(value: number) {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)} s`;
+  }
+
+  return `${Math.round(value)} ms`;
+}
 
 function buildIssueGuidance(issue: AutoCaptureIssue): GuidanceMessage {
   switch (issue) {
@@ -70,6 +87,16 @@ function buildIssueGuidance(issue: AutoCaptureIssue): GuidanceMessage {
       return {
         title: 'Wait For The Current Shot',
         message: 'Do not move yet. Let the current capture finish before rotating to the next angle.',
+      };
+    case 'turntable_calibrating':
+      return {
+        title: 'Calibrate Rotation',
+        message: 'Align the mark, tap start, then tap once per full rotation so the app can measure the real loaded speed.',
+      };
+    case 'turntable_prespin':
+      return {
+        title: 'Let The Plate Stabilize',
+        message: 'Keep the turntable spinning smoothly. Capture starts automatically after the pre-spin finishes.',
       };
     case 'camera_unavailable':
     default:
@@ -138,7 +165,28 @@ export function ScanScreen({ route, navigation }: Props) {
     () => validateSelectionFraming(session?.objectSelection),
     [session?.objectSelection],
   );
-  const stageReady = Boolean(hasObjectSelection && activeStage && !selectionIssue);
+  const stageReady = Boolean(
+    hasObjectSelection &&
+      !selectionIssue &&
+      (session?.captureMode === 'turntable' ? true : activeStage),
+  );
+  const turntableConfig = session?.turntableConfig;
+  const turntablePreset = useMemo(
+    () => getTurntableSpeedPreset(turntableConfig?.speedPresetId),
+    [turntableConfig?.speedPresetId],
+  );
+  const turntableRotationPeriodMs = useMemo(
+    () => getTurntableRotationPeriodMs(turntableConfig),
+    [turntableConfig],
+  );
+  const turntableIntervalMs = useMemo(
+    () => getTurntableCaptureIntervalMs(turntableRotationPeriodMs, slotsTotal),
+    [slotsTotal, turntableRotationPeriodMs],
+  );
+  const calibrationSamplesCount = turntableConfig?.calibrationSampleTimestamps?.length ?? 0;
+  const turntableCaptureStartsInMs = turntableConfig?.captureStartAt
+    ? Math.max(0, turntableConfig.captureStartAt - Date.now())
+    : null;
 
   const autoCapture = useAutoCapture({
     cameraRef: camera,
@@ -252,6 +300,94 @@ export function ScanScreen({ route, navigation }: Props) {
       }
     });
   }, [autoCapture]);
+
+  const updateSession = useCallback(
+    async (updater: (current: ScanSession) => ScanSession) => {
+      const current = getScanSession(scanId) ?? session;
+      if (!current) {
+        return;
+      }
+
+      const nextSession = updater(current);
+      await upsertScanSession(nextSession);
+      setSession(nextSession);
+    },
+    [scanId, session],
+  );
+
+  const onStartTurntableCalibration = useCallback(() => {
+    updateSession(current => ({
+      ...current,
+      turntableConfig: {
+        ...(current.turntableConfig ?? createDefaultTurntableConfig()),
+        calibrationSampleStartedAt: Date.now(),
+        calibrationSampleTimestamps: [Date.now()],
+        measuredRotationPeriodMs: undefined,
+        calibrationCompletedAt: undefined,
+        preSpinStartedAt: undefined,
+        captureStartAt: undefined,
+      },
+      images: [],
+    })).catch(() => undefined);
+  }, [updateSession]);
+
+  const onMarkTurntableRotation = useCallback(() => {
+    updateSession(current => {
+      const existingConfig = current.turntableConfig ?? createDefaultTurntableConfig();
+      if (!existingConfig.calibrationSampleStartedAt) {
+        return current;
+      }
+
+      const now = Date.now();
+      const sampleTimestamps = [...(existingConfig.calibrationSampleTimestamps ?? []), now];
+      const rotationSamples = sampleTimestamps.slice(1).map((timestamp, index) => timestamp - sampleTimestamps[index]);
+
+      if (rotationSamples.length < TURNTABLE_CALIBRATION_ROTATIONS) {
+        return {
+          ...current,
+          turntableConfig: {
+            ...existingConfig,
+            calibrationSampleTimestamps: sampleTimestamps,
+          },
+        };
+      }
+
+      const measuredRotationPeriodMs =
+        getMedianRotationPeriodMs(rotationSamples.slice(0, TURNTABLE_CALIBRATION_ROTATIONS)) ??
+        existingConfig.targetRotationPeriodMs;
+      const calibrationCompletedAt = now;
+
+      return {
+        ...current,
+        turntableConfig: {
+          ...existingConfig,
+          calibrationSampleTimestamps: sampleTimestamps,
+          measuredRotationPeriodMs,
+          calibrationCompletedAt,
+          preSpinStartedAt: calibrationCompletedAt,
+          captureStartAt: getTurntableCaptureStartAt(calibrationCompletedAt, measuredRotationPeriodMs),
+        },
+      };
+    }).catch(() => undefined);
+  }, [updateSession]);
+
+  const onResetTurntableCalibration = useCallback(() => {
+    updateSession(current => ({
+      ...current,
+      images: [],
+      turntableConfig: current.turntableConfig
+        ? {
+            ...current.turntableConfig,
+            calibrationSampleStartedAt: undefined,
+            calibrationSampleTimestamps: undefined,
+            measuredRotationPeriodMs: undefined,
+            calibrationCompletedAt: undefined,
+            preSpinStartedAt: undefined,
+            captureStartAt: undefined,
+          }
+        : createDefaultTurntableConfig(),
+    })).catch(() => undefined);
+  }, [updateSession]);
 
   const onFocusObjectPoint = useCallback(
     async ({
@@ -381,6 +517,49 @@ export function ScanScreen({ route, navigation }: Props) {
         ) : null}
 
         <View style={styles.captureHud} pointerEvents="box-none">
+          {session.captureMode === 'turntable' && hasObjectSelection ? (
+            <View style={styles.turntablePanel}>
+              <Text style={styles.turntableTitle}>Turntable Capture</Text>
+              <Text style={styles.turntableText}>
+                {turntablePreset.title}: target {formatDurationMs(turntablePreset.fullRotationMs)} / rotation
+              </Text>
+              <Text style={styles.turntableText}>
+                Measured {formatDurationMs(turntableRotationPeriodMs)} • {Math.round(turntableIntervalMs)} ms / shot
+              </Text>
+              <Text style={styles.turntableText}>
+                {turntableConfig?.measuredRotationPeriodMs
+                  ? turntableCaptureStartsInMs && turntableCaptureStartsInMs > 0
+                    ? `Pre-spin running. Auto capture starts in ${formatDurationMs(turntableCaptureStartsInMs)}.`
+                    : 'Calibration complete. Keep the plate rotating steadily.'
+                  : calibrationSamplesCount === 0
+                    ? 'Add a visible mark on the plate edge, align it once, then start calibration.'
+                    : `Rotation marks: ${Math.max(0, calibrationSamplesCount - 1)} / ${TURNTABLE_CALIBRATION_ROTATIONS}`}
+              </Text>
+              <View style={styles.turntableActions}>
+                {!turntableConfig?.calibrationSampleStartedAt || turntableConfig?.measuredRotationPeriodMs ? (
+                  <AppButton
+                    title={turntableConfig?.measuredRotationPeriodMs ? 'Recalibrate' : 'Start Calibration'}
+                    variant="secondary"
+                    onPress={onStartTurntableCalibration}
+                    style={styles.turntableActionButton}
+                  />
+                ) : (
+                  <AppButton
+                    title="Mark Full Rotation"
+                    variant="secondary"
+                    onPress={onMarkTurntableRotation}
+                    style={styles.turntableActionButton}
+                  />
+                )}
+                <AppButton
+                  title="Reset"
+                  variant="danger"
+                  onPress={onResetTurntableCalibration}
+                  style={styles.turntableActionButton}
+                />
+              </View>
+            </View>
+          ) : null}
           <View style={styles.captureArea}>
             <CaptureRing
               slotsTotal={slotsTotal}
@@ -505,6 +684,38 @@ function createStyles(theme: AppTheme) {
       alignItems: 'center',
       justifyContent: 'flex-end',
       paddingBottom: theme.spacing.lg,
+    },
+    turntablePanel: {
+      width: '100%',
+      marginBottom: theme.spacing.md,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.md,
+      backgroundColor: theme.colors.cameraPanel,
+      gap: theme.spacing.xs,
+    },
+    turntableTitle: {
+      color: theme.colors.cameraText,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    turntableText: {
+      color: theme.colors.cameraText,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    turntableActions: {
+      flexDirection: 'row',
+      gap: theme.spacing.sm,
+      marginTop: theme.spacing.xs,
+    },
+    turntableActionButton: {
+      flex: 1,
     },
     captureArea: {
       width: 236,

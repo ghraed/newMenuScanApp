@@ -11,14 +11,16 @@ import {
   normalizeHeading,
 } from '../lib/captureGuidance';
 import {
+  getTurntableCaptureDueAt,
+  getTurntableRotationPeriodMs,
+} from '../lib/turntable';
+import {
   ensureScanSessionDirectories,
   getScanImagesDirectoryPath,
   upsertScanSession,
 } from '../storage/scansStore';
 import { ScanCaptureMode, ScanImageSlot, ScanSession } from '../types/scanSession';
 import { HeadingState } from './useHeading';
-
-const TURNTABLE_CAPTURE_INTERVAL_MS = 500;
 
 type CaptureAttemptResult =
   | {
@@ -141,7 +143,10 @@ export function useAutoCapture({
         const currentStage = getActiveCaptureStage(pattern, capturedSlots);
         const targetSlot = getFirstMissingSlot(capturedSlots, activeSession.slotsTotal);
         const now = Date.now();
-        const inCooldown = now - lastAcceptedRef.current < TURNTABLE_CAPTURE_INTERVAL_MS;
+        const turntableConfig = activeSession.turntableConfig;
+        const calibrationComplete = Boolean(turntableConfig?.measuredRotationPeriodMs);
+        const rotationPeriodMs = getTurntableRotationPeriodMs(turntableConfig);
+        const captureStartAt = turntableConfig?.captureStartAt ?? null;
 
         if (targetSlot === null) {
           return {
@@ -161,12 +166,25 @@ export function useAutoCapture({
 
         if (!stageReadyRef.current) {
           issue = 'stage_locked';
-        } else if (inCooldown) {
-          issue = 'cooldown';
+        } else if (!calibrationComplete) {
+          issue = 'turntable_calibrating';
+        } else if (captureStartAt === null || now < captureStartAt) {
+          issue = 'turntable_prespin';
         } else if (capturingRef.current) {
           issue = 'capturing';
         } else if (!cameraRef.current) {
           issue = 'camera_unavailable';
+        } else {
+          const nextDueAt = getTurntableCaptureDueAt(
+            captureStartAt,
+            rotationPeriodMs,
+            activeSession.slotsTotal,
+            targetSlot,
+          );
+
+          if (now < nextDueAt) {
+            issue = 'cooldown';
+          }
         }
 
         return {
