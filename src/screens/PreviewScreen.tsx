@@ -444,6 +444,20 @@ export function PreviewScreen({ route, navigation }: Props) {
         const progress = normalizeProgress(job.progress);
 
         if (job.status === 'ready') {
+          const glbUrl = job.outputs?.glbSignedUrl ?? job.outputs?.glbUrl ?? buildFileUrl(remoteScanId, 'glb');
+          const usdzUrl = job.outputs?.usdzSignedUrl ?? job.outputs?.usdzUrl;
+
+          if (!glbUrl || !usdzUrl) {
+            const incompleteScan: ScanSession = {
+              ...current,
+              status: 'error',
+              progress,
+              message: '3D model finished without both GLB and USDZ outputs.',
+            };
+            await commitSession(incompleteScan);
+            throw new Error(incompleteScan.message);
+          }
+
           const readyScan: ScanSession = {
             ...current,
             status: 'ready',
@@ -1551,14 +1565,16 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
   }, [ensureExportPermission, isExporting, isSubmitting, scan]);
 
-  const onDownloadModel = React.useCallback(async () => {
-    const modelUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
-    if (!scan || !modelUrl || isSubmitting || isExporting || isDownloadingModel) {
+  const onDownloadModelAssets = React.useCallback(async () => {
+    const glbUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
+    const usdzUrl = scan?.outputs?.usdzSignedUrl ?? scan?.outputs?.usdzUrl;
+
+    if (!scan || !glbUrl || !usdzUrl || isSubmitting || isExporting || isDownloadingModel) {
       return;
     }
 
     if (Platform.OS !== 'android') {
-      Alert.alert('Not Supported', 'Model download is currently implemented for Android only.');
+      Alert.alert('Not Supported', '3D file download is currently implemented for Android only.');
       return;
     }
 
@@ -1579,33 +1595,53 @@ export function PreviewScreen({ route, navigation }: Props) {
       const exportDir = `${baseDir}/MenuScanApp/${scan.id}/model`;
       await RNFS.mkdir(exportDir);
 
-      const targetPath = `${exportDir}/model.glb`;
-      const result = await RNFS.downloadFile({
-        fromUrl: modelUrl,
-        toFile: targetPath,
-        headers: scan.outputs?.glbSignedUrl ? undefined : buildDownloadHeaders(),
-      }).promise;
+      const files = [
+        {
+          label: 'GLB',
+          url: glbUrl,
+          targetPath: `${exportDir}/model.glb`,
+          useAuthHeaders: !scan.outputs?.glbSignedUrl,
+        },
+        {
+          label: 'USDZ',
+          url: usdzUrl,
+          targetPath: `${exportDir}/model.usdz`,
+          useAuthHeaders: !scan.outputs?.usdzSignedUrl,
+        },
+      ];
 
-      if (result.statusCode < 200 || result.statusCode >= 300) {
-        const exists = await RNFS.exists(targetPath);
-        if (exists) {
-          await RNFS.unlink(targetPath);
+      const savedPaths: string[] = [];
+
+      for (const file of files) {
+        const result = await RNFS.downloadFile({
+          fromUrl: file.url,
+          toFile: file.targetPath,
+          headers: file.useAuthHeaders ? buildDownloadHeaders() : undefined,
+        }).promise;
+
+        if (result.statusCode < 200 || result.statusCode >= 300) {
+          const exists = await RNFS.exists(file.targetPath);
+          if (exists) {
+            await RNFS.unlink(file.targetPath);
+          }
+
+          throw new Error(`Failed to download ${file.label} (HTTP ${result.statusCode}).`);
         }
 
-        throw new Error(`Failed to download model (HTTP ${result.statusCode}).`);
+        savedPaths.push(file.targetPath);
+
+        try {
+          await RNFS.scanFile(file.targetPath);
+        } catch {
+          // Some Android versions/devices may not support media scan through RNFS typings/runtime.
+        }
       }
 
-      try {
-        await RNFS.scanFile(targetPath);
-      } catch {
-        // Some Android versions/devices may not support media scan through RNFS typings/runtime.
-      }
-
-      Alert.alert('Model Saved', `GLB model saved to:\n${targetPath}`);
+      Alert.alert('3D Files Saved', `GLB and USDZ saved to:\n${savedPaths.join('\n')}`);
     } catch (error) {
       Alert.alert(
         'Download Failed',
-        error instanceof Error ? error.message : 'Could not download the model.',
+        error instanceof Error ? error.message : 'Could not download the 3D files.',
       );
     } finally {
       if (mountedRef.current) {
@@ -2072,12 +2108,18 @@ export function PreviewScreen({ route, navigation }: Props) {
           {scan.status === 'ready' && modelDownloadUrl ? (
             <View style={styles.actions}>
               <AppButton
-                title={isDownloadingModel ? 'Downloading GLB...' : 'Download GLB'}
+                title={
+                  isDownloadingModel
+                    ? 'Downloading GLB + USDZ...'
+                    : usdzOpenUrl
+                      ? 'Download GLB + USDZ'
+                      : 'Download GLB'
+                }
                 variant="primary"
                 onPress={() => {
-                  onDownloadModel().catch(() => undefined);
+                  onDownloadModelAssets().catch(() => undefined);
                 }}
-                disabled={isDownloadingModel || isSubmitting || isExporting}
+                disabled={isDownloadingModel || isSubmitting || isExporting || !usdzOpenUrl}
               />
               <AppButton
                 title="Open GLB"
