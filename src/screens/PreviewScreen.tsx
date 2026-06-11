@@ -193,6 +193,15 @@ function buildDownloadHeaders() {
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
+function buildReadyAlertMessage(scan: ScanSession) {
+  const hasUsdz = Boolean(scan.outputs?.usdzSignedUrl ?? scan.outputs?.usdzUrl);
+  if (hasUsdz) {
+    return 'Your GLB and USDZ model files are ready to open.';
+  }
+
+  return 'Your GLB model is ready. USDZ is not available for this scan yet.';
+}
+
 function dishHasReusableModel(dish: MenuDish) {
   return dish.assets.some(asset => asset.asset_type === 'glb');
 }
@@ -445,14 +454,13 @@ export function PreviewScreen({ route, navigation }: Props) {
 
         if (job.status === 'ready') {
           const glbUrl = job.outputs?.glbSignedUrl ?? job.outputs?.glbUrl ?? buildFileUrl(remoteScanId, 'glb');
-          const usdzUrl = job.outputs?.usdzSignedUrl ?? job.outputs?.usdzUrl;
 
-          if (!glbUrl || !usdzUrl) {
+          if (!glbUrl) {
             const incompleteScan: ScanSession = {
               ...current,
               status: 'error',
               progress,
-              message: '3D model finished without both GLB and USDZ outputs.',
+              message: '3D model finished without a GLB output.',
             };
             await commitSession(incompleteScan);
             throw new Error(incompleteScan.message);
@@ -1044,7 +1052,10 @@ export function PreviewScreen({ route, navigation }: Props) {
           message: current.message,
         });
         await pollJobUntilDone(current, remoteScanId, existingJobId);
-        Alert.alert('3D Model Ready', 'Your model files are ready to open.');
+        const latestReadyScan = getScanSession(scanId);
+        if (latestReadyScan) {
+          Alert.alert('3D Model Ready', buildReadyAlertMessage(latestReadyScan));
+        }
         return;
       }
 
@@ -1090,7 +1101,10 @@ export function PreviewScreen({ route, navigation }: Props) {
       });
 
       await pollJobUntilDone(current, remoteScanId, submitResult.jobId);
-      Alert.alert('3D Model Ready', 'Your model files are ready to open.');
+      const latestReadyScan = getScanSession(scanId);
+      if (latestReadyScan) {
+        Alert.alert('3D Model Ready', buildReadyAlertMessage(latestReadyScan));
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not create 3D model.';
       const latestOnError = getScanSession(scanId) ?? scan;
@@ -1569,7 +1583,7 @@ export function PreviewScreen({ route, navigation }: Props) {
     const glbUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
     const usdzUrl = scan?.outputs?.usdzSignedUrl ?? scan?.outputs?.usdzUrl;
 
-    if (!scan || !glbUrl || !usdzUrl || isSubmitting || isExporting || isDownloadingModel) {
+    if (!scan || !glbUrl || isSubmitting || isExporting || isDownloadingModel) {
       return;
     }
 
@@ -1602,13 +1616,16 @@ export function PreviewScreen({ route, navigation }: Props) {
           targetPath: `${exportDir}/model.glb`,
           useAuthHeaders: !scan.outputs?.glbSignedUrl,
         },
-        {
+      ];
+
+      if (usdzUrl) {
+        files.push({
           label: 'USDZ',
           url: usdzUrl,
           targetPath: `${exportDir}/model.usdz`,
           useAuthHeaders: !scan.outputs?.usdzSignedUrl,
-        },
-      ];
+        });
+      }
 
       const savedPaths: string[] = [];
 
@@ -1637,7 +1654,10 @@ export function PreviewScreen({ route, navigation }: Props) {
         }
       }
 
-      Alert.alert('3D Files Saved', `GLB and USDZ saved to:\n${savedPaths.join('\n')}`);
+      Alert.alert(
+        '3D Files Saved',
+        `${usdzUrl ? 'GLB and USDZ' : 'GLB'} saved to:\n${savedPaths.join('\n')}`,
+      );
     } catch (error) {
       Alert.alert(
         'Download Failed',
@@ -2091,6 +2111,13 @@ export function PreviewScreen({ route, navigation }: Props) {
             </View>
           ) : null}
 
+          {scan.status === 'ready' && scan.message ? (
+            <View style={styles.progressCard}>
+              <Text style={styles.progressTitle}>3D Model Ready</Text>
+              <Text style={styles.progressMessage}>{scan.message}</Text>
+            </View>
+          ) : null}
+
           {scan.bgStatus === 'error' && scan.bgMessage ? (
             <View style={styles.errorCard}>
               <Text style={styles.errorTitle}>Background Removal Error</Text>
@@ -2110,7 +2137,9 @@ export function PreviewScreen({ route, navigation }: Props) {
               <AppButton
                 title={
                   isDownloadingModel
-                    ? 'Downloading GLB + USDZ...'
+                    ? usdzOpenUrl
+                      ? 'Downloading GLB + USDZ...'
+                      : 'Downloading GLB...'
                     : usdzOpenUrl
                       ? 'Download GLB + USDZ'
                       : 'Download GLB'
@@ -2119,7 +2148,7 @@ export function PreviewScreen({ route, navigation }: Props) {
                 onPress={() => {
                   onDownloadModelAssets().catch(() => undefined);
                 }}
-                disabled={isDownloadingModel || isSubmitting || isExporting || !usdzOpenUrl}
+                disabled={isDownloadingModel || isSubmitting || isExporting}
               />
               <AppButton
                 title="Open GLB"
