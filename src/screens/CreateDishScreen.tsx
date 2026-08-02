@@ -252,7 +252,7 @@ export function CreateDishScreen({ navigation, route }: Props) {
       return () => {
         isActive = false;
       };
-    }, [authUser?.restaurant?.id, scanId]),
+    }, [scanId, selectedModelId]),
   );
 
   useEffect(() => {

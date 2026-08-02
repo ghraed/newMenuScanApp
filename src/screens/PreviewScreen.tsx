@@ -9,9 +9,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import RNFS from 'react-native-fs';
@@ -32,8 +30,6 @@ import {
 } from '../api/scansApi';
 import { getApiKey } from '../api/config';
 import {
-  menuCopyDishModel,
-  menuCreateDish,
   menuGetDish,
   menuListDishes,
   menuUploadDishPreviewImage,
@@ -206,14 +202,6 @@ function dishHasReusableModel(dish: MenuDish) {
   return dish.assets.some(asset => asset.asset_type === 'glb');
 }
 
-function getDishModelPreviewUrl(dish: MenuDish) {
-  return (
-    dish.assets.find(asset => asset.asset_type === 'preview_image')?.file_url ??
-    dish.image_url ??
-    undefined
-  );
-}
-
 export function PreviewScreen({ route, navigation }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -222,27 +210,14 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [authUser, setAuthUser] = useState<AuthUser | undefined>(() => getAuthUser());
   const [dishes, setDishes] = useState<MenuDish[]>([]);
   const [isLoadingDishes, setIsLoadingDishes] = useState(false);
-  const [isCreatingDish, setIsCreatingDish] = useState(false);
-  const [isCopyingModel, setIsCopyingModel] = useState(false);
   const [isUpdatingPreviewImage, setIsUpdatingPreviewImage] = useState(false);
   const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
-  const [newDishName, setNewDishName] = useState('');
-  const [newDishDescription, setNewDishDescription] = useState('');
-  const [newDishPrice, setNewDishPrice] = useState('');
-  const [newDishCategory, setNewDishCategory] = useState('');
-  const [publishNewDish, setPublishNewDish] = useState<boolean>(
-    () => getScanSession(scanId)?.publishOnCreate ?? false,
-  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadingModel, setIsDownloadingModel] = useState(false);
   const mountedRef = useRef(true);
   const runningRef = useRef(false);
   const bgRunningRef = useRef(false);
-
-  const reload = React.useCallback(() => {
-    setScan(getScanSession(scanId));
-  }, [scanId]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -255,7 +230,6 @@ export function PreviewScreen({ route, navigation }: Props) {
         if (isActive) {
           setScan(nextScan);
           setAuthUser(nextAuthUser);
-          setPublishNewDish(nextScan?.publishOnCreate ?? false);
         }
 
         if (!nextAuthUser?.restaurant) {
@@ -829,156 +803,6 @@ export function PreviewScreen({ route, navigation }: Props) {
     },
     [authUser?.restaurant?.id, commitSession, scan, scanId],
   );
-
-  const applyExistingModel = React.useCallback(
-    async (sourceDish: MenuDish) => {
-      const latest = getScanSession(scanId) ?? scan;
-      if (!latest) {
-        return;
-      }
-
-      if (!authUser?.restaurant) {
-        setDishState({
-          kind: 'error',
-          message: 'Log in from Home before applying an existing 3D model.',
-        });
-        return;
-      }
-
-      if (!latest.dishId) {
-        setDishState({
-          kind: 'error',
-          message: 'Choose or create the target dish before selecting an existing 3D model.',
-        });
-        return;
-      }
-
-      if (latest.dishId === sourceDish.id) {
-        setDishState({
-          kind: 'error',
-          message: 'The target dish already owns this model. Pick a different reusable model.',
-        });
-        return;
-      }
-
-      try {
-        setIsCopyingModel(true);
-        setDishState({ kind: 'idle' });
-
-        const updatedDish = await menuCopyDishModel(latest.dishId, sourceDish.id);
-        const next = await commitSession({
-          ...latest,
-          dishId: updatedDish.id,
-          dishName: updatedDish.name,
-          modelSourceDishId: sourceDish.id,
-          modelSourceDishName: sourceDish.name,
-        });
-
-        setDishes(current =>
-          current.map(dish => (dish.id === updatedDish.id ? updatedDish : dish)),
-        );
-        setScan(next);
-        setDishState({
-          kind: 'success',
-          message: `Copied the 3D model from ${sourceDish.name} to ${updatedDish.name}.`,
-        });
-      } catch (error) {
-        setDishState({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Could not apply the selected 3D model.',
-        });
-      } finally {
-        setIsCopyingModel(false);
-      }
-    },
-    [authUser?.restaurant, commitSession, scan, scanId],
-  );
-
-  const togglePublishPreference = React.useCallback(
-    async (value: boolean) => {
-      setPublishNewDish(value);
-      const latest = getScanSession(scanId) ?? scan;
-      if (!latest) {
-        return;
-      }
-
-      await commitSession({
-        ...latest,
-        publishOnCreate: value,
-      });
-    },
-    [commitSession, scan, scanId],
-  );
-
-  const createDish = React.useCallback(async () => {
-    if (!authUser?.restaurant) {
-      setDishState({
-        kind: 'error',
-        message: 'Log in from Home before creating dishes from the scanner app.',
-      });
-      return;
-    }
-
-    const name = newDishName.trim();
-    const category = newDishCategory.trim();
-    const price = Number.parseFloat(newDishPrice);
-
-    if (!name) {
-      setDishState({ kind: 'error', message: 'Enter a dish name.' });
-      return;
-    }
-
-    if (!category) {
-      setDishState({ kind: 'error', message: 'Enter a category for the new dish.' });
-      return;
-    }
-
-    if (!Number.isFinite(price) || price < 0) {
-      setDishState({ kind: 'error', message: 'Enter a valid price.' });
-      return;
-    }
-
-    try {
-      setIsCreatingDish(true);
-      setDishState({ kind: 'idle' });
-
-      const createdDish = await menuCreateDish({
-        name,
-        description: newDishDescription.trim() || undefined,
-        price,
-        category,
-        status: publishNewDish ? 'published' : 'draft',
-      });
-
-      setDishes(current => [createdDish, ...current.filter(dish => dish.id !== createdDish.id)]);
-      await selectTargetDish(createdDish);
-      setNewDishName('');
-      setNewDishDescription('');
-      setNewDishPrice('');
-      setNewDishCategory('');
-      setDishState({
-        kind: 'success',
-        message: publishNewDish
-          ? 'Dish created and published. It will stay hidden from guests until the model is ready.'
-          : 'Dish created as draft. It now appears in the website admin view.',
-      });
-    } catch (error) {
-      setDishState({
-        kind: 'error',
-        message: error instanceof Error ? error.message : 'Could not create dish.',
-      });
-    } finally {
-      setIsCreatingDish(false);
-    }
-  }, [
-    authUser?.restaurant,
-    newDishCategory,
-    newDishDescription,
-    newDishName,
-    newDishPrice,
-    publishNewDish,
-    selectTargetDish,
-  ]);
 
   const ensureDishAttached = React.useCallback(
     async (session: ScanSession): Promise<ScanSession> => {
@@ -1692,14 +1516,6 @@ export function PreviewScreen({ route, navigation }: Props) {
 
     return orderedCapturedImages[0];
   }, [orderedCapturedImages, scan?.previewImageSlot]);
-  const reusableModelDishes = useMemo(
-    () => dishes.filter(dishHasReusableModel),
-    [dishes],
-  );
-  const availableSourceModels = useMemo(
-    () => reusableModelDishes.filter(dish => dish.id !== scan?.dishId),
-    [reusableModelDishes, scan?.dishId],
-  );
   const selectedSourceModel = useMemo(
     () => dishes.find(dish => dish.id === scan?.modelSourceDishId),
     [dishes, scan?.modelSourceDishId],
