@@ -59,6 +59,21 @@ react {
  */
 def enableProguardInReleaseBuilds = false
 
+def releaseSigningProperties = new Properties()
+def releaseSigningPropertiesFile = rootProject.file('keystore.properties')
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningProperties.load(new FileInputStream(releaseSigningPropertiesFile))
+}
+
+def releaseSigningValue = { String name ->
+    System.getenv("ANDROID_RELEASE_${name.toUpperCase()}") ?: releaseSigningProperties.getProperty(name)
+}
+def releaseStoreFile = releaseSigningValue('storeFile')
+def releaseStorePassword = releaseSigningValue('storePassword')
+def releaseKeyAlias = releaseSigningValue('keyAlias')
+def releaseKeyPassword = releaseSigningValue('keyPassword')
+def hasReleaseSigning = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { it }
+
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
@@ -92,17 +107,38 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasReleaseSigning) {
+            release {
+                storeFile rootProject.file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+tasks.register('verifyReleaseSigning') {
+    group = 'verification'
+    description = 'Fails unless all production release-signing values are configured.'
+
+    doLast {
+        if (!hasReleaseSigning) {
+            throw new GradleException(
+                'Production signing is not configured. Provide android/keystore.properties or ANDROID_RELEASE_* environment variables.'
+            )
         }
     }
 }
