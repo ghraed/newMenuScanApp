@@ -34,6 +34,8 @@ android/keystore.properties
 .cxx/
 *.keystore
 !debug.keystore
+menu_scan_gpu
+menu_scan_gpu.ppk
 .kotlin/
 
 # node.js
