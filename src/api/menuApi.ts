@@ -208,7 +208,7 @@ export async function menuLogout(): Promise<void> {
 
 export async function menuListDishes(): Promise<MenuDish[]> {
   try {
-    const dishes: MenuDish[] = [];
+    const dishesById = new Map<number, MenuDish>();
     let page = 1;
     let lastPage = 1;
 
@@ -221,12 +221,14 @@ export async function menuListDishes(): Promise<MenuDish[]> {
       });
 
       const parsed = dishesPageSchema.parse(response.data);
-      dishes.push(...parsed.data.map(normalizeDish));
+      for (const dish of parsed.data.map(normalizeDish)) {
+        dishesById.set(dish.id, dish);
+      }
       page = parsed.current_page + 1;
       lastPage = parsed.last_page;
     } while (page <= lastPage);
 
-    return dishes;
+    return Array.from(dishesById.values());
   } catch (error) {
     throw toApiError(error, 'Failed to load dishes');
   }
