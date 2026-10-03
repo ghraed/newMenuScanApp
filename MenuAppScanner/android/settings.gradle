@@ -4,3 +4,13 @@ extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autoli
 rootProject.name = 'MenuAppScanner'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
+
+// MMKV v4 depends on Nitro Modules, but its Android project reference is not
+// added unless Nitro is also a direct dependency/autolink target.
+include ':react-native-nitro-modules'
+project(':react-native-nitro-modules').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-nitro-modules/android')
+
+// Reanimated 4 depends on Worklets, but the Android subproject is only
+// available when Worklets is also linked as a direct dependency.
+include ':react-native-worklets'
+project(':react-native-worklets').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-worklets/android')
