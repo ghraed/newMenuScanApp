@@ -31,8 +31,8 @@ type StatusState =
 export function HomeScreen({ navigation }: Props) {
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('scan@rozer.pro');
+  const [password, setPassword] = useState('scan@rozer.pro');
   const [authUser, setCurrentAuthUser] = useState<MenuAuthUser | undefined>(() => getAuthUser());
   const [isRefreshingSession, setIsRefreshingSession] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -143,6 +143,8 @@ export function HomeScreen({ navigation }: Props) {
     } finally {
       clearAuthSession();
       setCurrentAuthUser(undefined);
+      setEmail('scan@rozer.pro');
+      setPassword('scan@rozer.pro');
       setStatusState({ kind: 'success', message: 'Signed out successfully.' });
       setIsLoggingOut(false);
     }

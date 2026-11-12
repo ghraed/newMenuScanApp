@@ -883,12 +883,14 @@ export function PreviewScreen({ route, navigation }: Props) {
         return;
       }
 
-      if (canRetryModelWithoutUpload(current)) {
+      if (canRetryModelWithoutUpload(current) || current.bgStatus === 'ready') {
         current = await commitSession({
           ...current,
           status: 'processing',
           progress: 0,
-          message: 'Retrying 3D model generation with existing uploaded images',
+          message: current.bgStatus === 'ready'
+            ? 'Creating 3D model with background-removed images'
+            : 'Retrying 3D model generation with existing uploaded images',
         });
       } else {
         const orderedImages = [...current.images].sort((a, b) => a.slot - b.slot);
