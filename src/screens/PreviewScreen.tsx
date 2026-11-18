@@ -218,6 +218,7 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [isDishPickerOpen, setIsDishPickerOpen] = useState(false);
   const [dishSearch, setDishSearch] = useState('');
   const [isSelectingDish, setIsSelectingDish] = useState(false);
+  const [areCapturedSlotsExpanded, setAreCapturedSlotsExpanded] = useState(false);
   const [isUpdatingPreviewImage, setIsUpdatingPreviewImage] = useState(false);
   const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1987,27 +1988,56 @@ export function PreviewScreen({ route, navigation }: Props) {
             </View>
           </View>
 
-          <View style={styles.thumbGrid}>
-            {scan.images.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>No captures yet. Add captures from Scan screen.</Text>
+          <View style={styles.section}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Captured slot images, ${orderedCapturedImages.length} of ${scan.slotsTotal}`}
+              accessibilityHint={areCapturedSlotsExpanded ? 'Hide slot images' : 'Show all slot images'}
+              accessibilityState={{ expanded: areCapturedSlotsExpanded }}
+              style={styles.slotSectionHeader}
+              onPress={() => setAreCapturedSlotsExpanded(current => !current)}>
+              <View style={styles.slotSectionHeaderCopy}>
+                <Text style={styles.slotSectionTitle}>Captured Slot Images</Text>
+                <Text style={styles.slotSectionCount}>
+                  {orderedCapturedImages.length} of {scan.slotsTotal} captured
+                </Text>
               </View>
-            ) : (
-              scan.images
-                .slice()
-                .sort((a, b) => a.slot - b.slot)
-                .map(capture => (
-                  <View key={`${capture.slot}_${capture.timestamp}`} style={styles.thumbCard}>
-                    <Image
-                      source={{
-                        uri: capture.path.startsWith('file://') ? capture.path : `file://${capture.path}`,
-                      }}
-                      style={styles.thumbImage}
-                    />
-                    <Text style={styles.thumbLabel}>Slot {capture.slot + 1}</Text>
+              {orderedCapturedImages[0] ? (
+                <Image
+                  accessibilityLabel={`First captured image, slot ${orderedCapturedImages[0].slot + 1}`}
+                  source={{
+                    uri: orderedCapturedImages[0].path.startsWith('file://')
+                      ? orderedCapturedImages[0].path
+                      : `file://${orderedCapturedImages[0].path}`,
+                  }}
+                  style={styles.slotSectionThumbnail}
+                />
+              ) : null}
+              <Text style={styles.slotSectionChevron} accessibilityElementsHidden>
+                {areCapturedSlotsExpanded ? '⌃' : '⌄'}
+              </Text>
+            </Pressable>
+            {areCapturedSlotsExpanded ? (
+              <View style={styles.thumbGrid}>
+                {orderedCapturedImages.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateText}>No captures yet. Add captures from Scan screen.</Text>
                   </View>
-                ))
-            )}
+                ) : (
+                  orderedCapturedImages.map(capture => (
+                    <View key={`${capture.slot}_${capture.timestamp}`} style={styles.thumbCard}>
+                      <Image
+                        source={{
+                          uri: capture.path.startsWith('file://') ? capture.path : `file://${capture.path}`,
+                        }}
+                        style={styles.thumbImage}
+                      />
+                      <Text style={styles.thumbLabel}>Slot {capture.slot + 1}</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : null}
           </View>
 
           {backgroundOutputs.length > 0 ? (
@@ -2647,6 +2677,51 @@ function createStyles(theme: AppTheme) {
       lineHeight: theme.typography.bodySmall.lineHeight,
       fontWeight: theme.typography.bodySmall.fontWeight,
       letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    slotSectionHeader: {
+      minHeight: 80,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.md,
+      ...theme.shadows.card,
+    },
+    slotSectionHeaderCopy: {
+      flex: 1,
+      gap: theme.spacing.xxs,
+    },
+    slotSectionTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.sectionTitle.fontFamily,
+      fontSize: theme.typography.sectionTitle.fontSize,
+      lineHeight: theme.typography.sectionTitle.lineHeight,
+      fontWeight: theme.typography.sectionTitle.fontWeight,
+      letterSpacing: theme.typography.sectionTitle.letterSpacing,
+    },
+    slotSectionCount: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.typography.bodySmall.fontFamily,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
+      fontWeight: theme.typography.bodySmall.fontWeight,
+      letterSpacing: theme.typography.bodySmall.letterSpacing,
+    },
+    slotSectionThumbnail: {
+      width: 56,
+      height: 56,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: theme.colors.surfaceAlt,
+    },
+    slotSectionChevron: {
+      color: theme.colors.primary,
+      fontSize: 28,
+      lineHeight: 30,
     },
     thumbGrid: {
       flexDirection: 'row',
