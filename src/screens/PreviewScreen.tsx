@@ -219,6 +219,8 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [dishSearch, setDishSearch] = useState('');
   const [isSelectingDish, setIsSelectingDish] = useState(false);
   const [areCapturedSlotsExpanded, setAreCapturedSlotsExpanded] = useState(false);
+  const [isPreviewPickerExpanded, setIsPreviewPickerExpanded] = useState(false);
+  const [areBackgroundOutputsExpanded, setAreBackgroundOutputsExpanded] = useState(false);
   const [isUpdatingPreviewImage, setIsUpdatingPreviewImage] = useState(false);
   const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1617,6 +1619,9 @@ export function PreviewScreen({ route, navigation }: Props) {
         .sort((a, b) => a.slot - b.slot),
     [scan?.bgOutputs],
   );
+  const firstBackgroundPreviewUri = backgroundOutputs[0]
+    ? getBackgroundPreviewUri(backgroundOutputs[0])
+    : null;
   const backgroundButtonTitle = useMemo(() => {
     if (isExporting) {
       return hasFinalBackgroundOutputs(scan)
@@ -1926,66 +1931,94 @@ export function PreviewScreen({ route, navigation }: Props) {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Dish Preview Image</Text>
-            <View style={styles.dishCard}>
-              <Text style={styles.label}>Selected Preview Photo</Text>
-              <Text style={styles.selectedDishName}>{selectedPreviewLabel}</Text>
-              <Text style={styles.helper}>
-                Pick one of your captured photos. This image will be uploaded as the dish preview and can be changed later.
-              </Text>
-
-              {orderedCapturedImages.length === 0 ? (
-                <Text style={styles.helper}>
-                  Capture at least one image from the Scan screen before choosing a preview photo.
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Dish preview image, ${orderedCapturedImages.length} photos${selectedPreviewCapture ? `, photo ${selectedPreviewCapture.slot + 1} selected` : ''}`}
+              accessibilityHint={isPreviewPickerExpanded ? 'Hide preview photo picker' : 'Show preview photo picker'}
+              accessibilityState={{ expanded: isPreviewPickerExpanded }}
+              style={styles.slotSectionHeader}
+              onPress={() => setIsPreviewPickerExpanded(current => !current)}>
+              <View style={styles.slotSectionHeaderCopy}>
+                <Text style={styles.slotSectionTitle}>Dish Preview Image</Text>
+                <Text style={styles.slotSectionCount}>
+                  {orderedCapturedImages.length} photos • {selectedPreviewLabel}
                 </Text>
-              ) : (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.previewPickerRow}
-                  keyboardShouldPersistTaps="handled">
-                  {orderedCapturedImages.map(capture => {
-                    const isSelected = capture.slot === selectedPreviewCapture?.slot;
-                    const uri = capture.path.startsWith('file://') ? capture.path : `file://${capture.path}`;
+              </View>
+              {selectedPreviewCapture ? (
+                <Image
+                  source={{
+                    uri: selectedPreviewCapture.path.startsWith('file://')
+                      ? selectedPreviewCapture.path
+                      : `file://${selectedPreviewCapture.path}`,
+                  }}
+                  style={styles.slotSectionThumbnail}
+                />
+              ) : null}
+              <Text style={styles.slotSectionChevron} accessibilityElementsHidden>
+                {isPreviewPickerExpanded ? '⌃' : '⌄'}
+              </Text>
+            </Pressable>
+            {isPreviewPickerExpanded ? (
+              <View style={styles.dishCard}>
+                <Text style={styles.label}>Selected Preview Photo</Text>
+                <Text style={styles.selectedDishName}>{selectedPreviewLabel}</Text>
+                <Text style={styles.helper}>
+                  Pick one of your captured photos. This image will be uploaded as the dish preview and can be changed later.
+                </Text>
 
-                    return (
-                      <Pressable
-                        key={`${capture.slot}_${capture.timestamp}`}
-                        style={styles.previewPickerItem}
-                        onPress={() => {
-                          selectPreviewImageSlot(capture.slot).catch(() => undefined);
-                        }}>
-                        <Image
-                          source={{ uri }}
-                          style={[
-                            styles.previewPickerImage,
-                            isSelected && styles.previewPickerImageSelected,
-                          ]}
-                        />
-                        <Text style={styles.previewPickerLabel}>
-                          {isSelected ? `Preview ${capture.slot + 1}` : `Photo ${capture.slot + 1}`}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              )}
+                {orderedCapturedImages.length === 0 ? (
+                  <Text style={styles.helper}>
+                    Capture at least one image from the Scan screen before choosing a preview photo.
+                  </Text>
+                ) : (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.previewPickerRow}
+                    keyboardShouldPersistTaps="handled">
+                    {orderedCapturedImages.map(capture => {
+                      const isSelected = capture.slot === selectedPreviewCapture?.slot;
+                      const uri = capture.path.startsWith('file://') ? capture.path : `file://${capture.path}`;
 
-              <AppButton
-                title={isUpdatingPreviewImage ? 'Updating Preview Image...' : 'Apply Preview Image to Dish'}
-                onPress={() => {
-                  applyPreviewImageToDish().catch(() => undefined);
-                }}
-                disabled={
-                  !isAuthenticated ||
-                  isSubmitting ||
-                  isExporting ||
-                  isUpdatingPreviewImage ||
-                  orderedCapturedImages.length === 0 ||
-                  !scan.dishId
-                }
-              />
-            </View>
+                      return (
+                        <Pressable
+                          key={`${capture.slot}_${capture.timestamp}`}
+                          style={styles.previewPickerItem}
+                          onPress={() => {
+                            selectPreviewImageSlot(capture.slot).catch(() => undefined);
+                          }}>
+                          <Image
+                            source={{ uri }}
+                            style={[
+                              styles.previewPickerImage,
+                              isSelected && styles.previewPickerImageSelected,
+                            ]}
+                          />
+                          <Text style={styles.previewPickerLabel}>
+                            {isSelected ? `Preview ${capture.slot + 1}` : `Photo ${capture.slot + 1}`}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+
+                <AppButton
+                  title={isUpdatingPreviewImage ? 'Updating Preview Image...' : 'Apply Preview Image to Dish'}
+                  onPress={() => {
+                    applyPreviewImageToDish().catch(() => undefined);
+                  }}
+                  disabled={
+                    !isAuthenticated ||
+                    isSubmitting ||
+                    isExporting ||
+                    isUpdatingPreviewImage ||
+                    orderedCapturedImages.length === 0 ||
+                    !scan.dishId
+                  }
+                />
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.section}>
@@ -2042,25 +2075,50 @@ export function PreviewScreen({ route, navigation }: Props) {
 
           {backgroundOutputs.length > 0 ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Background-Removed Preview</Text>
-              <View style={styles.thumbGrid}>
-                {backgroundOutputs.map(output => {
-                  const uri = getBackgroundPreviewUri(output);
-                  if (!uri) {
-                    return null;
-                  }
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Background-removed images, ${backgroundOutputs.length} available`}
+                accessibilityHint={areBackgroundOutputsExpanded ? 'Hide background-removed images' : 'Show background-removed images'}
+                accessibilityState={{ expanded: areBackgroundOutputsExpanded }}
+                style={styles.slotSectionHeader}
+                onPress={() => setAreBackgroundOutputsExpanded(current => !current)}>
+                <View style={styles.slotSectionHeaderCopy}>
+                  <Text style={styles.slotSectionTitle}>Background-Removed Preview</Text>
+                  <Text style={styles.slotSectionCount}>
+                    {backgroundOutputs.length} images available
+                  </Text>
+                </View>
+                {firstBackgroundPreviewUri ? (
+                  <Image
+                    source={{ uri: firstBackgroundPreviewUri }}
+                    style={styles.slotSectionThumbnail}
+                    resizeMode="contain"
+                  />
+                ) : null}
+                <Text style={styles.slotSectionChevron} accessibilityElementsHidden>
+                  {areBackgroundOutputsExpanded ? '⌃' : '⌄'}
+                </Text>
+              </Pressable>
+              {areBackgroundOutputsExpanded ? (
+                <View style={styles.thumbGrid}>
+                  {backgroundOutputs.map(output => {
+                    const uri = getBackgroundPreviewUri(output);
+                    if (!uri) {
+                      return null;
+                    }
 
-                  return (
-                    <View key={`bg_${output.slot}_${output.updatedAt}`} style={styles.thumbCard}>
-                      <Image source={{ uri }} style={styles.thumbImage} resizeMode="contain" />
-                      <View style={styles.thumbMetaRow}>
-                        <Text style={styles.thumbLabel}>Slot {output.slot + 1}</Text>
-                        <Text style={styles.thumbBadge}>{output.finalPath ? 'Final' : 'Preview'}</Text>
+                    return (
+                      <View key={`bg_${output.slot}_${output.updatedAt}`} style={styles.thumbCard}>
+                        <Image source={{ uri }} style={styles.thumbImage} resizeMode="contain" />
+                        <View style={styles.thumbMetaRow}>
+                          <Text style={styles.thumbLabel}>Slot {output.slot + 1}</Text>
+                          <Text style={styles.thumbBadge}>{output.finalPath ? 'Final' : 'Preview'}</Text>
+                        </View>
                       </View>
-                    </View>
-                  );
-                })}
-              </View>
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
           ) : null}
 
