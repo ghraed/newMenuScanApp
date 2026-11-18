@@ -256,6 +256,36 @@ export function PreviewScreen({ route, navigation }: Props) {
             return;
           }
 
+          if (nextScan.restaurantId && nextScan.restaurantId !== nextAuthUser.restaurant.id) {
+            if (nextScan.remoteScanId) {
+              setDishState({
+                kind: 'error',
+                message: 'This scan was uploaded for another restaurant. Sign in to that restaurant to continue.',
+              });
+              return;
+            }
+
+            const reassignedScan: ScanSession = {
+              ...nextScan,
+              restaurantId: nextAuthUser.restaurant.id,
+              dishId: undefined,
+              dishName: undefined,
+              modelSourceDishId: undefined,
+              modelSourceDishName: undefined,
+              bgStatus: undefined,
+              bgMessage: undefined,
+            };
+            await upsertScanSession(reassignedScan);
+            if (isActive) {
+              setScan(reassignedScan);
+              setDishState({
+                kind: 'error',
+                message: 'Your restaurant changed. Select its matching dish before continuing; your photos are saved.',
+              });
+            }
+            return;
+          }
+
           const selectedDish = nextScan.dishId
             ? loadedDishes.find(dish => dish.id === nextScan.dishId)
             : undefined;
@@ -353,6 +383,22 @@ export function PreviewScreen({ route, navigation }: Props) {
     }
     return next;
   }, []);
+
+  const dismissError = React.useCallback(
+    async (kind: 'model' | 'background') => {
+      const current = getScanSession(scanId) ?? scan;
+      if (!current) {
+        return;
+      }
+
+      await commitSession(
+        kind === 'model'
+          ? { ...current, message: undefined }
+          : { ...current, bgMessage: undefined },
+      );
+    },
+    [commitSession, scan, scanId],
+  );
 
   const ensureRemoteScan = React.useCallback(
     async (session: ScanSession): Promise<ScanSession> => {
@@ -842,6 +888,10 @@ export function PreviewScreen({ route, navigation }: Props) {
       Alert.alert('Login Required', 'Log in from Home before generating a 3D model.');
       return;
     }
+    if (latest.restaurantId && latest.restaurantId !== authUser.restaurant.id) {
+      Alert.alert('Restaurant Changed', 'Sign in to the restaurant that owns this uploaded scan.');
+      return;
+    }
     if (!latest.dishId) {
       Alert.alert(
         'Dish Required',
@@ -973,6 +1023,10 @@ export function PreviewScreen({ route, navigation }: Props) {
         Alert.alert('Login Required', 'Log in from Home before generating background-removed images.');
         return;
       }
+      if (latest.restaurantId && latest.restaurantId !== authUser.restaurant.id) {
+        Alert.alert('Restaurant Changed', 'Sign in to the restaurant that owns this uploaded scan.');
+        return;
+      }
       if (latest.images.length === 0) {
         Alert.alert('No Captures', 'Capture at least one image before generating background-removed images.');
         return;
@@ -1000,36 +1054,51 @@ export function PreviewScreen({ route, navigation }: Props) {
           const totalUploads = orderedImages.length;
           let completedUploads = 0;
 
-          await deleteScanBackgroundOutputs(current.id);
+          const reuseCompletedUploads =
+            current.bgStatus === 'error' &&
+            !current.bgJobId &&
+            current.bgUploadCompleted === totalUploads &&
+            current.bgUploadTotal === totalUploads &&
+            current.bgProgress === 30;
 
-          current = await commitSession({
-            ...current,
-            bgJobId: undefined,
-            bgStatus: 'uploading',
-            bgProgress: 0,
-            bgMessage: 'Uploading images for background removal',
-            bgAvailableSlots: [],
-            bgPreviewAvailable: false,
-            bgPreviewReadyAt: undefined,
-            bgUploadCompleted: 0,
-            bgUploadTotal: totalUploads,
-            bgOutputs: undefined,
-          });
-
-          await runWithConcurrency(orderedImages, BG_UPLOAD_CONCURRENCY, async image => {
-            await uploadWithRetry(remoteScanId, image, current.objectSelection);
-            completedUploads += 1;
-            const latestSession = getScanSession(scanId) ?? current;
+          if (reuseCompletedUploads) {
             current = await commitSession({
-              ...latestSession,
+              ...current,
               bgStatus: 'uploading',
-              bgProgress:
-                totalUploads === 0 ? 0 : Math.round((completedUploads / totalUploads) * 30),
-              bgMessage: `Uploading images ${completedUploads}/${totalUploads}`,
-              bgUploadCompleted: completedUploads,
-              bgUploadTotal: totalUploads,
+              bgMessage: 'Starting background removal from uploaded images',
             });
-          });
+          } else {
+            await deleteScanBackgroundOutputs(current.id);
+
+            current = await commitSession({
+              ...current,
+              bgJobId: undefined,
+              bgStatus: 'uploading',
+              bgProgress: 0,
+              bgMessage: 'Uploading images for background removal',
+              bgAvailableSlots: [],
+              bgPreviewAvailable: false,
+              bgPreviewReadyAt: undefined,
+              bgUploadCompleted: 0,
+              bgUploadTotal: totalUploads,
+              bgOutputs: undefined,
+            });
+
+            await runWithConcurrency(orderedImages, BG_UPLOAD_CONCURRENCY, async image => {
+              await uploadWithRetry(remoteScanId, image, current.objectSelection);
+              completedUploads += 1;
+              const latestSession = getScanSession(scanId) ?? current;
+              current = await commitSession({
+                ...latestSession,
+                bgStatus: 'uploading',
+                bgProgress:
+                  totalUploads === 0 ? 0 : Math.round((completedUploads / totalUploads) * 30),
+                bgMessage: `Uploading images ${completedUploads}/${totalUploads}`,
+                bgUploadCompleted: completedUploads,
+                bgUploadTotal: totalUploads,
+              });
+            });
+          }
 
           try {
             const start = await apiStartBackgroundRemoval(remoteScanId, {
@@ -1917,7 +1986,18 @@ export function PreviewScreen({ route, navigation }: Props) {
 
           {scan.status === 'error' && scan.message ? (
             <View style={styles.errorCard}>
-              <Text style={styles.errorTitle}>Processing Error</Text>
+              <View style={styles.errorHeader}>
+                <Text style={styles.errorTitle}>Processing Error</Text>
+                <Pressable
+                  onPress={() => { dismissError('model').catch(() => undefined); }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss processing error"
+                  hitSlop={8}
+                  style={styles.errorClose}
+                >
+                  <Text style={styles.errorCloseText}>×</Text>
+                </Pressable>
+              </View>
               <Text style={styles.errorText}>{scan.message}</Text>
             </View>
           ) : null}
@@ -1938,7 +2018,18 @@ export function PreviewScreen({ route, navigation }: Props) {
 
           {scan.bgStatus === 'error' && scan.bgMessage ? (
             <View style={styles.errorCard}>
-              <Text style={styles.errorTitle}>Background Removal Error</Text>
+              <View style={styles.errorHeader}>
+                <Text style={styles.errorTitle}>Background Removal Error</Text>
+                <Pressable
+                  onPress={() => { dismissError('background').catch(() => undefined); }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss background removal error"
+                  hitSlop={8}
+                  style={styles.errorClose}
+                >
+                  <Text style={styles.errorCloseText}>×</Text>
+                </Pressable>
+              </View>
               <Text style={styles.errorText}>{scan.bgMessage}</Text>
             </View>
           ) : null}
@@ -2358,7 +2449,25 @@ function createStyles(theme: AppTheme) {
       padding: theme.spacing.md,
       gap: theme.spacing.xs,
     },
+    errorHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.sm,
+    },
+    errorClose: {
+      width: 32,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    errorCloseText: {
+      color: theme.colors.text,
+      fontSize: 26,
+      lineHeight: 30,
+    },
     errorTitle: {
+      flex: 1,
       color: theme.colors.text,
       fontFamily: theme.typography.sectionTitle.fontFamily,
       fontSize: theme.typography.sectionTitle.fontSize,

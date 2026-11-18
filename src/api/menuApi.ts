@@ -69,6 +69,15 @@ const dishesPageSchema = z.object({
   last_page: z.number().int().positive(),
 });
 
+const publishedDishesSchema = z.object({
+  dishes: z.array(z.object({
+    id: z.number().int().positive(),
+    name: z.string(),
+    price: z.number(),
+    category: z.string(),
+  })),
+});
+
 type MenuDishSchema = z.infer<typeof dishSchema>;
 
 const menuApiClient = axios.create({
@@ -230,6 +239,20 @@ export async function menuListDishes(): Promise<MenuDish[]> {
 
     return Array.from(dishesById.values());
   } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 403) {
+      try {
+        const response = await menuApiClient.get('/dishes/published');
+        const { dishes } = publishedDishesSchema.parse(response.data);
+        return dishes.map(dish => ({
+          ...dish,
+          uuid: `published-${dish.id}`,
+          status: 'published' as const,
+          assets: [],
+        }));
+      } catch (fallbackError) {
+        throw toApiError(fallbackError, 'Failed to load dishes');
+      }
+    }
     throw toApiError(error, 'Failed to load dishes');
   }
 }

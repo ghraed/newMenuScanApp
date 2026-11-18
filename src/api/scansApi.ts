@@ -36,7 +36,7 @@ const backgroundJobResponseSchema = z.object({
   progress: z.number(),
   availableSlots: z.array(z.number().int().nonnegative()).default([]),
   previewAvailable: z.boolean().default(false),
-  message: z.string().optional(),
+  message: z.string().nullish().transform(value => value ?? undefined),
 });
 
 const jobResponseSchema = z.object({
