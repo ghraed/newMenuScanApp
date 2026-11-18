@@ -2,16 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   PermissionsAndroid,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -210,6 +215,9 @@ export function PreviewScreen({ route, navigation }: Props) {
   const [authUser, setAuthUser] = useState<AuthUser | undefined>(() => getAuthUser());
   const [dishes, setDishes] = useState<MenuDish[]>([]);
   const [isLoadingDishes, setIsLoadingDishes] = useState(false);
+  const [isDishPickerOpen, setIsDishPickerOpen] = useState(false);
+  const [dishSearch, setDishSearch] = useState('');
+  const [isSelectingDish, setIsSelectingDish] = useState(false);
   const [isUpdatingPreviewImage, setIsUpdatingPreviewImage] = useState(false);
   const [dishState, setDishState] = useState<DishState>({ kind: 'idle' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1569,6 +1577,16 @@ export function PreviewScreen({ route, navigation }: Props) {
     () => dishes.find(dish => dish.id === scan?.dishId),
     [dishes, scan?.dishId],
   );
+  const matchingDishes = useMemo(() => {
+    const query = dishSearch.trim().toLocaleLowerCase();
+    if (!query) {
+      return dishes;
+    }
+
+    return dishes.filter(dish =>
+      `${dish.name} ${dish.category}`.toLocaleLowerCase().includes(query),
+    );
+  }, [dishes, dishSearch]);
   const orderedCapturedImages = useMemo(
     () => [...(scan?.images ?? [])].sort((a, b) => a.slot - b.slot),
     [scan?.images],
@@ -1802,30 +1820,108 @@ export function PreviewScreen({ route, navigation }: Props) {
                     : 'Log in to load your restaurant dishes.'}
                 </Text>
               ) : (
-                <View style={styles.dishList}>
-                  {dishes.map(dish => {
-                    const isSelected = dish.id === scan.dishId;
-                    return (
-                      <Pressable
-                        key={dish.id}
-                        style={[styles.dishRow, isSelected && styles.dishRowSelected]}
-                        onPress={() => {
-                          selectTargetDish(dish).catch(() => undefined);
-                        }}>
-                        <View style={styles.dishRowCopy}>
-                          <Text style={styles.dishRowTitle}>{dish.name}</Text>
-                          <Text style={styles.dishRowMeta}>
-                            {dish.category} • ${dish.price.toFixed(2)} • {dish.status}
-                          </Text>
-                          <Text style={styles.dishRowMeta}>Model: {dish.model_state ?? 'none'}</Text>
-                        </View>
-                        <Text style={styles.dishRowTag}>{isSelected ? 'Target' : 'Use'}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Choose target dish. Current target: ${selectedDishName ?? 'none'}`}
+                  accessibilityHint="Opens a searchable list of restaurant dishes"
+                  style={styles.dishPickerTrigger}
+                  onPress={() => {
+                    setDishSearch('');
+                    setIsDishPickerOpen(true);
+                  }}>
+                  <View style={styles.dishRowCopy}>
+                    <Text style={styles.dishRowTitle} numberOfLines={2}>
+                      {selectedDishName ?? 'Choose a dish'}
+                    </Text>
+                    <Text style={styles.dishRowMeta}>
+                      {selectedTargetDish
+                        ? `${selectedTargetDish.category} • $${selectedTargetDish.price.toFixed(2)}`
+                        : `${dishes.length} dishes available`}
+                    </Text>
+                  </View>
+                  <Text style={styles.dishPickerChevron} accessibilityElementsHidden>
+                    ⌄
+                  </Text>
+                </Pressable>
               )}
             </View>
+            <Modal
+              visible={isDishPickerOpen}
+              animationType="slide"
+              onRequestClose={() => setIsDishPickerOpen(false)}>
+              <KeyboardAvoidingView
+                behavior={Platform.select({ ios: 'padding', default: undefined })}
+                style={styles.dishPickerScreen}>
+              <SafeAreaView style={styles.dishPickerSafeArea}>
+                  <View style={styles.dishPickerHeader}>
+                    <View style={styles.dishRowCopy}>
+                      <Text style={styles.dishPickerTitle}>Choose Target Dish</Text>
+                      <Text style={styles.dishRowMeta}>{dishes.length} restaurant dishes</Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Close dish picker"
+                      style={styles.dishPickerClose}
+                      onPress={() => setIsDishPickerOpen(false)}>
+                      <Text style={styles.dishPickerCloseText}>Close</Text>
+                    </Pressable>
+                  </View>
+                  <TextInput
+                    accessibilityLabel="Search dishes by name or category"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="Search dishes by name or category"
+                    placeholderTextColor={theme.colors.textMuted}
+                    underlineColorAndroid="transparent"
+                    value={dishSearch}
+                    onChangeText={setDishSearch}
+                    style={styles.dishPickerSearch}
+                  />
+                  <FlatList
+                    data={matchingDishes}
+                    keyExtractor={dish => String(dish.id)}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.dishPickerList}
+                    ListEmptyComponent={
+                      <Text style={styles.helper}>No dishes match your search.</Text>
+                    }
+                    renderItem={({ item: dish }) => {
+                      const isSelected = dish.id === scan.dishId;
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${dish.name}, ${dish.category}, $${dish.price.toFixed(2)}${isSelected ? ', current target' : ''}`}
+                          accessibilityState={{ selected: isSelected, disabled: isSelectingDish }}
+                          disabled={isSelectingDish}
+                          style={[styles.dishRow, isSelected && styles.dishRowSelected]}
+                          onPress={() => {
+                            setIsSelectingDish(true);
+                            selectTargetDish(dish)
+                              .then(() => setIsDishPickerOpen(false))
+                              .catch(() => {
+                                setDishState({
+                                  kind: 'error',
+                                  message: 'Could not select that dish. Please try again.',
+                                });
+                                Alert.alert('Dish Selection Failed', 'Could not select that dish. Please try again.');
+                              })
+                              .finally(() => setIsSelectingDish(false));
+                          }}>
+                          <View style={styles.dishRowCopy}>
+                            <Text style={styles.dishRowTitle}>{dish.name}</Text>
+                            <Text style={styles.dishRowMeta}>
+                              {dish.category} • ${dish.price.toFixed(2)} • {dish.status}
+                            </Text>
+                            <Text style={styles.dishRowMeta}>Model: {dish.model_state ?? 'none'}</Text>
+                          </View>
+                          <Text style={styles.dishRowTag}>{isSelected ? 'Target' : 'Use'}</Text>
+                        </Pressable>
+                      );
+                    }}
+                  />
+              </SafeAreaView>
+              </KeyboardAvoidingView>
+            </Modal>
           </View>
 
           <View style={styles.section}>
@@ -2290,10 +2386,79 @@ function createStyles(theme: AppTheme) {
     inlineInput: {
       flex: 1,
     },
-    dishList: {
+    dishPickerTrigger: {
+      minHeight: 56,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      backgroundColor: theme.colors.surfaceAlt,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      padding: theme.spacing.md,
+    },
+    dishPickerChevron: {
+      color: theme.colors.primary,
+      fontSize: 28,
+      lineHeight: 30,
+    },
+    dishPickerScreen: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    dishPickerSafeArea: {
+      flex: 1,
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: theme.spacing.lg,
+    },
+    dishPickerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      marginBottom: theme.spacing.md,
+    },
+    dishPickerTitle: {
+      color: theme.colors.text,
+      fontFamily: theme.typography.title.fontFamily,
+      fontSize: theme.typography.title.fontSize,
+      lineHeight: theme.typography.title.lineHeight,
+      fontWeight: theme.typography.title.fontWeight,
+    },
+    dishPickerClose: {
+      minHeight: 48,
+      justifyContent: 'center',
+      paddingHorizontal: theme.spacing.md,
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+    },
+    dishPickerCloseText: {
+      color: theme.colors.primary,
+      fontFamily: theme.typography.button.fontFamily,
+      fontSize: theme.typography.button.fontSize,
+      lineHeight: theme.typography.button.lineHeight,
+      fontWeight: theme.typography.button.fontWeight,
+    },
+    dishPickerSearch: {
+      color: theme.colors.text,
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radius.md,
+      minHeight: 48,
+      paddingHorizontal: theme.spacing.md,
+      fontFamily: theme.typography.body.fontFamily,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
+      marginBottom: theme.spacing.md,
+    },
+    dishPickerList: {
       gap: theme.spacing.sm,
+      paddingBottom: theme.spacing.xxl,
     },
     dishRow: {
+      minHeight: 72,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
