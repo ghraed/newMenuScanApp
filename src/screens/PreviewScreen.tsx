@@ -27,6 +27,7 @@ import {
   apiCancelJob,
   apiCreateScan,
   apiGetJob,
+  apiGetScan,
   apiStartBackgroundRemoval,
   apiSubmitScan,
   apiUploadImage,
@@ -1486,10 +1487,7 @@ export function PreviewScreen({ route, navigation }: Props) {
   }, [ensureExportPermission, isExporting, isSubmitting, scan]);
 
   const onDownloadModelAssets = React.useCallback(async () => {
-    const glbUrl = scan?.outputs?.glbSignedUrl ?? scan?.outputs?.glbUrl;
-    const usdzUrl = scan?.outputs?.usdzSignedUrl ?? scan?.outputs?.usdzUrl;
-
-    if (!scan || !glbUrl || isSubmitting || isExporting || isDownloadingModel) {
+    if (!scan || isSubmitting || isExporting || isDownloadingModel) {
       return;
     }
 
@@ -1507,6 +1505,19 @@ export function PreviewScreen({ route, navigation }: Props) {
     setIsDownloadingModel(true);
 
     try {
+      const freshOutputs = scan.remoteScanId
+        ? (await apiGetScan(scan.remoteScanId)).outputs
+        : scan.outputs;
+      const glbUrl = freshOutputs?.glbSignedUrl ?? freshOutputs?.glbUrl;
+      const usdzUrl = freshOutputs?.usdzSignedUrl ?? freshOutputs?.usdzUrl;
+      if (!glbUrl) {
+        throw new Error('No GLB is available for this scan.');
+      }
+      if (scan.remoteScanId && freshOutputs) {
+        const latest = getScanSession(scanId) ?? scan;
+        await commitSession({ ...latest, outputs: freshOutputs });
+      }
+
       const baseDir = RNFS.DownloadDirectoryPath || RNFS.PicturesDirectoryPath;
       if (!baseDir) {
         throw new Error('No public download directory found on this device.');
@@ -1520,7 +1531,7 @@ export function PreviewScreen({ route, navigation }: Props) {
           label: 'GLB',
           url: glbUrl,
           targetPath: `${exportDir}/model.glb`,
-          useAuthHeaders: !scan.outputs?.glbSignedUrl,
+          useAuthHeaders: !freshOutputs?.glbSignedUrl,
         },
       ];
 
@@ -1529,7 +1540,7 @@ export function PreviewScreen({ route, navigation }: Props) {
           label: 'USDZ',
           url: usdzUrl,
           targetPath: `${exportDir}/model.usdz`,
-          useAuthHeaders: !scan.outputs?.usdzSignedUrl,
+          useAuthHeaders: !freshOutputs?.usdzSignedUrl,
         });
       }
 
@@ -1574,7 +1585,32 @@ export function PreviewScreen({ route, navigation }: Props) {
         setIsDownloadingModel(false);
       }
     }
-  }, [ensureExportPermission, isDownloadingModel, isExporting, isSubmitting, scan]);
+  }, [commitSession, ensureExportPermission, isDownloadingModel, isExporting, isSubmitting, scan, scanId]);
+
+  const onOpenModelAsset = React.useCallback(async (type: 'glb' | 'usdz') => {
+    if (!scan) {
+      return;
+    }
+
+    try {
+      const freshOutputs = scan.remoteScanId
+        ? (await apiGetScan(scan.remoteScanId)).outputs
+        : scan.outputs;
+      const url = type === 'glb'
+        ? freshOutputs?.glbSignedUrl ?? freshOutputs?.glbUrl
+        : freshOutputs?.usdzSignedUrl ?? freshOutputs?.usdzUrl;
+      if (!url) {
+        throw new Error(`No ${type.toUpperCase()} is available for this scan.`);
+      }
+      if (scan.remoteScanId && freshOutputs) {
+        const latest = getScanSession(scanId) ?? scan;
+        await commitSession({ ...latest, outputs: freshOutputs });
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert('Open Failed', error instanceof Error ? error.message : 'Could not open the model file.');
+    }
+  }, [commitSession, scan, scanId]);
 
   const selectedTargetDish = useMemo(
     () => dishes.find(dish => dish.id === scan?.dishId),
@@ -2247,7 +2283,7 @@ export function PreviewScreen({ route, navigation }: Props) {
                 title="Open GLB"
                 variant="secondary"
                 onPress={() => {
-                  Linking.openURL(modelDownloadUrl).catch(() => undefined);
+                  onOpenModelAsset('glb').catch(() => undefined);
                 }}
               />
               {usdzOpenUrl ? (
@@ -2255,7 +2291,7 @@ export function PreviewScreen({ route, navigation }: Props) {
                   title="Open USDZ"
                   variant="secondary"
                   onPress={() => {
-                    Linking.openURL(usdzOpenUrl).catch(() => undefined);
+                    onOpenModelAsset('usdz').catch(() => undefined);
                   }}
                 />
               ) : null}

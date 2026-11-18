@@ -39,6 +39,18 @@ const backgroundJobResponseSchema = z.object({
   message: z.string().nullish().transform(value => value ?? undefined),
 });
 
+const modelOutputsSchema = z.object({
+  glbUrl: z.string().optional(),
+  glbSignedUrl: z.string().optional(),
+  usdzUrl: z.string().optional(),
+  usdzSignedUrl: z.string().optional(),
+});
+
+const scanResponseSchema = z.object({
+  scanId: z.string().min(1),
+  outputs: modelOutputsSchema.optional(),
+});
+
 const jobResponseSchema = z.object({
   status: z.union([
     z.literal('queued'),
@@ -52,14 +64,7 @@ const jobResponseSchema = z.object({
   message: z.string().optional(),
   availableSlots: z.array(z.number().int().nonnegative()).optional(),
   previewAvailable: z.boolean().optional(),
-  outputs: z
-    .object({
-      glbUrl: z.string().optional(),
-      glbSignedUrl: z.string().optional(),
-      usdzUrl: z.string().optional(),
-      usdzSignedUrl: z.string().optional(),
-    })
-    .optional(),
+  outputs: modelOutputsSchema.optional(),
 });
 
 export type ApiCreateScanRequest = {
@@ -84,6 +89,7 @@ export type ApiStartBackgroundRemovalResponse = {
   legacyCompleted?: boolean;
 };
 export type ApiGetJobResponse = z.infer<typeof jobResponseSchema>;
+export type ApiGetScanResponse = z.infer<typeof scanResponseSchema>;
 export type FileType = 'glb' | 'usdz';
 
 export type ApiUploadImageParams = {
@@ -256,6 +262,15 @@ export async function apiGetJob(jobId: string): Promise<ApiGetJobResponse> {
     return parseApiResponse(jobResponseSchema, normalizeLegacyJobResponse(response.data), 'apiGetJob');
   } catch (error) {
     throw toApiError(error, `Failed to fetch job ${jobId}`);
+  }
+}
+
+export async function apiGetScan(scanId: string): Promise<ApiGetScanResponse> {
+  try {
+    const response = await apiClient.get(`/scans/${scanId}`);
+    return parseApiResponse(scanResponseSchema, response.data, 'apiGetScan');
+  } catch (error) {
+    throw toApiError(error, `Failed to fetch scan ${scanId}`);
   }
 }
 
